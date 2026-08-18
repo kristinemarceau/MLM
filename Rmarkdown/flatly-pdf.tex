@@ -101,13 +101,23 @@
 \usepackage{tabularx}
 \renewcommand{\arraystretch}{1.15}
 
+% ------------------------------------------------------------
+% Captions
+% ------------------------------------------------------------
 \usepackage{caption}
+
 \captionsetup{
-  font=small,
+  font=medium,
   labelfont={bf,color=FlatlyNavy},
   textfont={color=FlatlyDark},
   labelsep=period,
   skip=6pt
+}
+
+% Left-align figure captions, even when the figure itself is centered
+\captionsetup[figure]{
+  justification=raggedright,
+  singlelinecheck=false
 }
 
 \usepackage{fvextra}
