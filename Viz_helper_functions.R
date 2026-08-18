@@ -10,7 +10,7 @@
 #
 # or, if sourcing directly from GitHub:
 #
-#   source("UPDATE TO TRENT'S GITHUB!")
+#   source("https://raw.githubusercontent.com/kristinemarceau/MLM/main/Viz_helper_functions.R")
 #
 # Required packages:
 #   dplyr
@@ -582,7 +582,135 @@ plot_longitudinal_facets <- function(data,
       strip.text = ggplot2::element_text(size = 12)
     )
 }
+      
+############################################################
+# plot_nesting_boxplot()
+#
+# Purpose:
+#   Creates boxplots for a random subset of participants,
+#   families, clusters, or other grouping units. Each boxplot
+#   shows the distribution of repeated observations within one
+#   unit, making within- versus between-unit variability easy
+#   to see.
+#
+# Arguments:
+#   data:
+#     A long-format data frame.
+#
+#   var:
+#     The unquoted name of the numeric variable to plot.
+#
+#   id_var:
+#     The unquoted name of the participant/family/cluster ID
+#     defining the nesting unit.
+#
+#   sample_n:
+#     Number of unique IDs to randomly sample. Defaults to 12.
+#
+#   seed:
+#     Random seed for reproducible sampling. Defaults to 2025.
+#
+#   title:
+#     Optional plot title. If NULL, a title is generated.
+#
+#   xlab:
+#     Optional x-axis label. If NULL, the ID variable name is used.
+#
+#   ylab:
+#     Optional y-axis label. If NULL, the outcome variable name is used.
+#
+# Example:
+#   plot_nesting_boxplot(
+#     data = all_merged,
+#     var = cesd,
+#     id_var = AID,
+#     sample_n = 12,
+#     seed = 1,
+#     title = "CES-D by Participant (Random 12 Participants)",
+#     xlab = "Participant",
+#     ylab = "CES-D Depressive Symptoms"
+#   )
+#
+# Notes:
+#   - Data should be in long format.
+#   - Missing values on var or id_var are removed before plotting.
+#   - If sample_n is larger than the number of available IDs,
+#     all IDs are used.
+#   - Boxes summarize within-unit distributions; differences
+#     between boxes illustrate between-unit variability.
+############################################################
 
+plot_nesting_boxplot <- function(data,
+                                 var,
+                                 id_var,
+                                 sample_n = 12,
+                                 seed = 2025,
+                                 title = NULL,
+                                 xlab = NULL,
+                                 ylab = NULL) {
+
+  var_sym <- rlang::enquo(var)
+  id_sym  <- rlang::enquo(id_var)
+
+  var_str <- rlang::as_label(var_sym)
+  id_str  <- rlang::as_label(id_sym)
+
+  plot_data_base <- data %>%
+    dplyr::filter(
+      !is.na(!!var_sym),
+      !is.na(!!id_sym)
+    )
+
+  set.seed(seed)
+
+  id_list <- plot_data_base %>%
+    dplyr::distinct(!!id_sym)
+
+  sampled_ids <- id_list %>%
+    dplyr::slice_sample(
+      n = min(sample_n, nrow(id_list))
+    ) %>%
+    dplyr::pull(!!id_sym)
+
+  plot_data <- plot_data_base %>%
+    dplyr::filter(!!id_sym %in% sampled_ids)
+
+  ggplot2::ggplot(
+    plot_data,
+    ggplot2::aes(
+      x = factor(!!id_sym),
+      y = !!var_sym,
+      fill = factor(!!id_sym)
+    )
+  ) +
+    ggplot2::geom_boxplot(
+      alpha = 0.7,
+      color = "black"
+    ) +
+    ggplot2::geom_jitter(
+      width = 0.15,
+      size = 2,
+      alpha = 0.6,
+      shape = 21,
+      color = "black"
+    ) +
+    ggplot2::scale_fill_manual(
+      values = rep(cleanplots, length.out = length(sampled_ids))
+    ) +
+    ggplot2::labs(
+      title = ifelse(
+        is.null(title),
+        paste0(var_str, " by ", id_str),
+        title
+      ),
+      x = ifelse(is.null(xlab), id_str, xlab),
+      y = ifelse(is.null(ylab), var_str, ylab)
+    ) +
+    ggplot2::theme_minimal() +
+    ggplot2::theme(
+      legend.position = "none"
+    )
+}
 
 ############################################################
 # plot_nominal()
