@@ -1,11 +1,22 @@
 % Flatly-inspired PDF styling for R Markdown
 % Use with latex_engine: xelatex
 
+% Clean sans-serif typography
 \usepackage{fontspec}
-\defaultfontfeatures{Ligatures=TeX}
-\setsansfont{TeX Gyre Heros}
-\setmainfont{TeX Gyre Heros}
-\setmonofont{Latin Modern Mono}
+
+\IfFontExistsTF{Arial}{
+  \setsansfont{Arial}
+  \setmainfont{Arial}
+}{
+  \IfFontExistsTF{Helvetica}{
+    \setsansfont{Helvetica}
+    \setmainfont{Helvetica}
+  }{
+    % Fall back to whatever sans-serif font LaTeX has available
+    \renewcommand{\familydefault}{\sfdefault}
+  }
+}
+
 \renewcommand{\familydefault}{\sfdefault}
 
 \usepackage{xcolor}
