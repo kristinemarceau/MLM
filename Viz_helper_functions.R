@@ -708,7 +708,11 @@ plot_nesting_boxplot <- function(data,
     ) +
     ggplot2::theme_minimal() +
     ggplot2::theme(
-      legend.position = "none"
+      legend.position = "none",
+      axis.text.x = ggplot2::element_text(
+        angle = 45,
+        hjust = 1
+      )
     )
 }
 
