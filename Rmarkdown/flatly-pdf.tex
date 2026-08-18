@@ -88,11 +88,14 @@
 % Links
 \usepackage{hyperref}
 
-\hypersetup{
-  colorlinks=true,
-  linkcolor=FlatlyTeal,
-  urlcolor=FlatlyTeal,
-  citecolor=FlatlyTeal
+\AtBeginDocument{
+  \hypersetup{
+    colorlinks=true,
+    linkcolor=FlatlyTeal,
+    urlcolor=FlatlyTeal,
+    citecolor=FlatlyTeal,
+    filecolor=FlatlyTeal
+  }
 }
 
 \usepackage{xurl}
