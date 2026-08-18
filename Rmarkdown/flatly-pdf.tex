@@ -1,0 +1,137 @@
+% Flatly-inspired PDF styling for R Markdown
+% Use with latex_engine: xelatex
+
+\usepackage{fontspec}
+\defaultfontfeatures{Ligatures=TeX}
+\setsansfont{TeX Gyre Heros}
+\setmainfont{TeX Gyre Heros}
+\setmonofont{Latin Modern Mono}
+\renewcommand{\familydefault}{\sfdefault}
+
+\usepackage{xcolor}
+\definecolor{FlatlyNavy}{HTML}{2C3E50}
+\definecolor{FlatlyTeal}{HTML}{18BC9C}
+\definecolor{FlatlyGray}{HTML}{7B8A8B}
+\definecolor{FlatlyLightGray}{HTML}{ECF0F1}
+\definecolor{FlatlyMidGray}{HTML}{95A5A6}
+\definecolor{FlatlyDark}{HTML}{212529}
+
+\usepackage{setspace}
+\setstretch{1.05}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+
+\usepackage{enumitem}
+\setlist{nosep}
+\setlist[itemize]{topsep=4pt,itemsep=3pt,parsep=0pt}
+\setlist[enumerate]{topsep=4pt,itemsep=3pt,parsep=0pt}
+
+\usepackage{titlesec}
+\titleformat{\section}
+  {\LARGE\bfseries\color{FlatlyNavy}}
+  {\thesection}{0.75em}{}
+\titleformat{\subsection}
+  {\Large\bfseries\color{FlatlyNavy}}
+  {\thesubsection}{0.75em}{}
+\titleformat{\subsubsection}
+  {\large\bfseries\color{FlatlyGray}}
+  {\thesubsubsection}{0.75em}{}
+
+\titlespacing*{\section}{0pt}{1.6em}{0.55em}
+\titlespacing*{\subsection}{0pt}{1.25em}{0.4em}
+\titlespacing*{\subsubsection}{0pt}{1em}{0.3em}
+
+\newcommand{\flatlyrule}{%
+  \vspace{-0.25em}
+  {\color{FlatlyTeal}\rule{\linewidth}{1.2pt}}
+  \vspace{0.35em}
+}
+
+\let\oldsection\section
+\renewcommand{\section}[1]{%
+  \oldsection{#1}%
+  \flatlyrule
+}
+
+\makeatletter
+\renewcommand{\maketitle}{%
+  \begin{flushleft}
+    \colorbox{FlatlyNavy}{%
+      \parbox{\dimexpr\textwidth-2\fboxsep\relax}{%
+        \vspace{0.8em}
+        {\color{white}\fontsize{24}{28}\selectfont\bfseries \@title\par}
+        \vspace{0.35em}
+      }%
+    }%
+    \vspace{0.8em}
+    {\large\color{FlatlyGray}\@author\par}
+    \vspace{0.15em}
+    {\normalsize\color{FlatlyMidGray}\@date\par}
+    \vspace{0.9em}
+    {\color{FlatlyTeal}\rule{\textwidth}{2pt}}
+    \vspace{1em}
+  \end{flushleft}
+}
+\makeatother
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=FlatlyNavy,
+  urlcolor=FlatlyTeal,
+  citecolor=FlatlyNavy
+}
+\usepackage{xurl}
+
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{tabularx}
+\renewcommand{\arraystretch}{1.15}
+
+\usepackage{caption}
+\captionsetup{
+  font=small,
+  labelfont={bf,color=FlatlyNavy},
+  textfont={color=FlatlyDark},
+  labelsep=period,
+  skip=6pt
+}
+
+\usepackage{fvextra}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{
+  breaklines=true,
+  breakanywhere=true,
+  commandchars=\\\{\},
+  fontsize=\small
+}
+
+\usepackage{framed}
+\definecolor{shadecolor}{HTML}{F7F9FA}
+
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{FlatlyGray}\nouppercase{\leftmark}}
+\fancyhead[R]{\small\color{FlatlyGray}\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\headrule}{%
+  \hbox to\headwidth{%
+    \color{FlatlyTeal}\leaders\hrule height \headrulewidth\hfill
+  }
+}
+\fancyfoot[C]{}
+
+\fancypagestyle{plain}{
+  \fancyhf{}
+  \renewcommand{\headrulewidth}{0pt}
+  \fancyfoot[C]{\small\color{FlatlyGray}\thepage}
+}
+
+\renewcommand{\labelitemi}{\textcolor{FlatlyTeal}{\textbullet}}
+
+\usepackage{tocloft}
+\renewcommand{\cfttoctitlefont}{\LARGE\bfseries\color{FlatlyNavy}}
+\renewcommand{\cftsecfont}{\color{FlatlyNavy}}
+\renewcommand{\cftsubsecfont}{\color{FlatlyDark}}
+\renewcommand{\cftsecpagefont}{\color{FlatlyGray}}
+\renewcommand{\cftsubsecpagefont}{\color{FlatlyGray}}
