@@ -1,0 +1,2755 @@
+---
+title: "2026 Summer Institute on<br>Longitudinal Data Analysis"
+author: "Prepared by Kristine Marceau and Jennifer Hu"
+date: "2026-07-06"
+output:
+  html_document:
+    code-copy: true
+    toc: yes
+    css: purdue.css
+    toc_float:
+      collapsed: yes
+      smooth_scroll: no
+    toc_depth: 4
+    includes:
+      in_header: acumin-pro.html
+      before_body: logo.html
+  pdf_document:
+    toc: yes
+    toc_depth: 4
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+
+```{r setup-branding, include=FALSE}
+
+brand_url <- "https://tdmize.github.io/data/Rmarkdown"
+brand_files <- c("purdue.css", "acumin-pro.html", "logo.html")
+
+for (f in brand_files) {
+  try(
+    download.file(
+      paste(brand_url, f, sep = "/"),
+      destfile = f,
+      quiet = TRUE,
+      mode = "wb"
+    ),
+    silent = TRUE
+  )
+}
+
+```
+
+# Overview
+
+This file includes the data cleaning code for ABCD variables that can be
+used as examples in the Methodology Center Summer Institute on
+Longitudinal Data Analysis. For each section below, the code is
+organized by topic/phenotype (level 1 header), a description of the
+datasets and variables used according to ABCD documentation (level 2
+header), the items and descriptions from each dataset are provided under
+the dataset name (level 3 header). As applicable, the scored phenotypes
+will be listed (level 4 headers). Finally, code for cleaning and
+creating summary variables are also provided (level 2 headers).
+
+**Please note that we did not correct any distributions/outliers - this
+is up to each instructor.**
+
+Data documentation can be found here:
+<https://docs.abcdstudy.org/latest/documentation/curation/structure.html>
+
+Load in packages and data (Hidden)
+
+```{r, message=FALSE, warning=FALSE}
+
+#clear working memory, if needed
+rm(list = ls())
+
+# Data manipulation
+library(tidyverse)      # dplyr, ggplot2, readr, tidyr, tibble,
+                        # purrr, stringr, forcats
+# Reading ABCD data
+library(arrow)          # read_parquet()
+
+# Dates and times
+library(lubridate)      # Date/time handling (visit dates)
+
+# Descriptive statistics
+library(psych)          # describe()
+library(moments)        # skewness(), kurtosis()
+                        # (used inside the plotting helper functions)
+
+# Tables
+library(kableExtra)     # kbl(), kable_minimal(),
+                        # kable_styling(), collapse_rows(),
+                        # scroll_box()
+
+# Custom plotting functions
+source("https://raw.githubusercontent.com/tdmize/Rfunctions/main/Viz_helper_functions.R")
+
+```
+
+# Codebook by Construct:
+
+```{r construct-codebook, echo=FALSE, warning=FALSE, message=FALSE}
+
+construct_codebook <- tribble(
+  ~construct, ~indicator, ~description, ~waves_measured,
+
+  "Identifiers", "<i>participant_id</i>", "Unique participant identifier.", "All waves (0-7)",
+  "Metrics of Time", "<i>session_id</i>", "ABCD assessment session identifier.", "All waves (0-7)",
+  "Metrics of Time", "<i>timepoint</i>", "Numeric timepoint extracted from session_id.", "All waves (0-7)",
+  "Metrics of Time", "<i>ab_g_dyn__visit_dtt</i>", "Date and time at the start of the visit.", "All waves (0-7)",
+  "Metrics of Time", "<i>ab_g_dyn__visit_age</i>", "Youth age at the start of the visit.", "All waves (0-7)",
+
+  "Identifiers", "<i>ab_g_stc__design_id__fam</i>", "Family ID. Participants from the same family share a family ID.", "Baseline / time-invariant",
+  "Identifiers", "<i>ab_g_stc__design_id__birth</i>", "Birth event ID. Participants born together share a birth event ID.", "Baseline / time-invariant",
+  "Identifiers", "<i>ab_g_stc__design_famrel</i>", "Family relationship structure indicator.", "Baseline / time-invariant",
+  "Identifiers", "<i>ab_g_dyn__design_site</i>", "Study Site. (1-21)", "All waves (0-7)",
+   "Identifiers", "<i>zyg</i>", "Final zygosity/family relatedness variable. 1 = MZ twin; 2 = DZ twin; 3 = sibling.", "Baseline / time-invariant", 
+  
+  "Survey Weights", "<i>ab_g_stc__cohort_acsps</i>", "Imputed raked propensity weight", "Baseline",
+
+  "Demographics and household", "<i>ab_g_stc__cohort_ethnrace__leg</i>", "Parent-reported child race/ethnicity. 1 = Hispanic; 2 = White; 3 = Black; 4 = Asian; 13 = Other.", "Baseline / time-invariant",
+  "Demographics and household", "<i>ab_g_stc__cohort_race__nih</i>", "Child race based on NIH classification.", "Baseline / time-invariant",
+  "Demographics and household", "<i>ab_g_stc__cohort_sex</i>", "Parent-reported sex assigned at birth. 1 = Male; 2 = Female.", "Baseline / time-invariant",
+  "Demographics and household", "<i>ab_p_demo__relation_001</i>", "Relationship of the reporting caregiver to the participant.", "All waves (0-7)",
+  "Demographics and household", "<i>ab_p_demo__marital__slf_001</i>", "Marital status of the reporting caregiver.", "All waves (0-7)",
+  "Demographics and household", "<i>housepop</i>", "Number of people living at the youth's address.", "All waves (0-7)",
+  "Demographics and household", "<i>multigen</i>", "Indicator for whether the youth lives in a multigenerational household.", "All waves (0-7)",
+  "Demographics and household", "<i>ab_p_demo__child__time_001</i>", "Whether the child spends significant time in another household.", "All waves (0-7)",
+  "Demographics and household", "<i>ab_p_demo__child__time_001__01</i>", "Amount of time per week the child spends in another household.", "All waves (0-7)",
+  "Demographics and household", "<i>ab_p_demo__child__time_001__02</i>", "Best person to contact about the other household.", "All waves (0-7)",
+
+  "Family environment and parenting", "<i>fc_y_fes__cohes_mean</i>", "Youth-reported Family Environment Scale cohesion mean score.", "Waves 4 and 7",
+  "Family environment and parenting", "<i>fc_y_fes__confl_mean</i>", "Youth-reported Family Environment Scale conflict mean score.", "All waves (0-7)",
+  "Family environment and parenting", "<i>ch_gen_know</i>", "Child-perceived parental monitoring/general knowledge, based on the youth-reported parental monitoring mean score.", "All waves (0-7)",
+  "Family environment and parenting", "<i>par_su_rules</i>", "Parent-reported substance use rules composite. Higher scores indicate stricter and more strongly enforced rules regarding alcohol, tobacco, and marijuana.", "All waves (0-7)",
+
+  "Peers", "<i>fc_y_rpi_mean</i>", "Youth-reported Resistance to Peer Influence mean score. Higher scores indicate greater resistance to peer influence.", "Waves 4-6",
+  "Peers", "<i>positive_peer_mean</i>", "Mean of positive peer characteristic items, including friends being athletes, attending religious/spiritual services, and being excellent students.", "Waves 2-7",
+  "Peers", "<i>negative_peer_mean</i>", "Mean of negative peer behavior items, including friends skipping school, being suspended, and shoplifting.", "Waves 2-7",
+
+  "Mental health", "<i>mh_p_cbcl__synd__ext_sum</i>", "Parent-reported CBCL externalizing syndrome scale sum.", "All waves (0-7)",
+  "Mental health", "<i>mh_p_cbcl__synd__int_sum</i>", "Parent-reported CBCL internalizing syndrome scale sum.", "All waves (0-7)",
+  "Mental health", "<i>mh_p_cbcl__synd__attn_sum</i>", "Parent-reported CBCL attention problems syndrome scale sum.", "All waves (0-7)",
+  "Mental health", "<i>mh_y_bpm__ext_sum</i>", "Youth-reported Brief Problem Monitor externalizing sum score.", "Waves 1-6",
+  "Mental health", "<i>mh_y_bpm__int_sum</i>", "Youth-reported Brief Problem Monitor internalizing sum score.", "Waves 1-6",
+  "Mental health", "<i>mh_y_pai_sum</i>", "Youth-reported NIH Toolbox Positive Affect Items sum score.", "Waves 1, 3, and 5",
+
+  "Substance use risk", "<i>su_y_sui__hrd__alc_001</i>", "Heard of alcohol, such as beer, wine, or liquor. 0 = No; 1 = Yes.", "Full data at wave 0; limited data at waves 1-2",
+  "Substance use risk", "<i>su_y_sui__hrd__nic_001</i>", "Heard of tobacco products. 0 = No; 1 = Yes.", "Full data at wave 0; limited data at waves 1-2",
+  "Substance use risk", "<i>su_y_sui__hrd__mj_001</i>", "Heard of marijuana, weed, pot, blunts, dabs, marijuana drinks, or food with marijuana. 0 = No; 1 = Yes.", "Full data at wave 0; limited data at waves 1-2",
+  "Substance use risk", "<i>su_y_itu__alc_001</i>-<i>su_y_itu__alc_003</i>", "Alcohol curiosity, intention to try soon, and willingness to try if offered by a best friend.", "All waves (0-7)",
+  "Substance use risk", "<i>su_y_itu__nic_001</i>-<i>su_y_itu__nic_003</i>", "Tobacco curiosity, intention to try soon, and willingness to try if offered by a best friend.", "All waves (0-7)",
+  "Substance use risk", "<i>su_y_itu__mj_001</i>-<i>su_y_itu__mj_003</i>", "Marijuana curiosity, intention to try soon, and willingness to try if offered by a best friend.", "All waves (0-7)",
+
+  "Substance use", "<i>AUC</i>", "Alcohol uptake continuum. Higher scores indicate greater alcohol use involvement.", "All waves (0-7)",
+  "Substance use", "<i>AU_init</i>", "Alcohol use initiation indicator. 0 = no initiation; 1 = alcohol uptake score greater than or equal to 1.", "All waves (0-7)",
+  "Substance use", "<i>TUC</i>", "Tobacco uptake continuum. Higher scores indicate greater tobacco/nicotine use involvement.", "All waves (0-7)",
+  "Substance use", "<i>TU_init</i>", "Tobacco use initiation indicator. 0 = no initiation; 1 = tobacco uptake score greater than or equal to 1.", "All waves (0-7)",
+  "Substance use", "<i>MUC</i>", "Marijuana uptake continuum. Higher scores indicate greater marijuana use involvement.", "All waves (0-7)",
+  "Substance use", "<i>MU_init</i>", "Marijuana use initiation indicator. 0 = no initiation; 1 = marijuana uptake score greater than or equal to 1.", "All waves (0-7)",
+  "Substance use", "<i>SUC</i>", "Overall substance use continuum/involvement score, calculated from alcohol, tobacco, and marijuana uptake continua.", "All waves (0-7)",
+  "Substance use", "<i>SU_init</i>", "Any substance use initiation indicator. 0 = no substance use initiation; 1 = initiation of alcohol, tobacco, or marijuana use.", "All waves (0-7)",
+
+  "Substance use", "<i>fulldrink</i>", "Combined baseline/longitudinal full drink indicator from su_y_sui__use__alc_001 and su_y_sui__use__alc_001__l.", "All waves (0-7)",
+  "Substance use", "<i>sipalc</i>", "Combined baseline/longitudinal sip of alcohol indicator from su_y_lowuse__isip_002 and su_y_lowuse__isip_002__l.", "All waves (0-7)",
+  "Substance use", "<i>puffnic</i>", "Combined baseline/longitudinal puff nicotine indicator from su_y_lowuse__nic_001 and su_y_lowuse__nic_001__l.", "All waves (0-7)",
+  "Substance use", "<i>fullnic</i>", "Combined baseline/longitudinal full cigarette use indicator from su_y_sui__use__nic__cig_001 and su_y_sui__use__nic__cig_001__l.", "All waves (0-7)",
+  "Substance use", "<i>puffmj</i>", "Combined baseline/longitudinal marijuana puff/use indicator from su_y_sui__use__mj__puff_001 and su_y_sui__use__mj__puff_001__l.", "All waves (0-7)",
+  "Substance use", "<i>fullmj</i>", "Combined baseline/longitudinal smoked marijuana indicator from su_y_sui__use__mj__smoke_001 and su_y_sui__use__mj__smoke_001__l.", "All waves (0-7)",
+
+  "Substance use", "<i>su_y_tlfb__alc__binge_ud</i>; <i>su_y_tlfb__alc_ud</i>; <i>su_y_tlfb__alc_mean</i>", "Alcohol binge episode use days, alcohol use days, and average dose.", "All waves (0-7)",
+  "Substance use", "<i>su_y_tlfb__nic__cig_mean</i>; <i>su_y_tlfb__nic__cig_ud</i>", "Nicotine cigarette average dose and number of use days.", "All waves (0-7)",
+  "Substance use", "<i>su_y_tlfb__mj__smoke_mean</i>; <i>su_y_tlfb__mj__smoke_ud</i>", "Average smoked marijuana on use days and number of smoked marijuana use days.", "All waves (0-7)",
+  "Substance use", "<i>su_y_alcsre__6mo_count</i>; <i>su_y_alcsre__hvy_count</i>", "Subjective experiences from drinking alcohol in the past 6 months and during heaviest drinking period.", "All waves (0-7)",
+  "Substance use", "<i>su_y_nicsre__cig_sum</i>", "Total intensity of positive and negative effects of first cigarette use.", "All waves (0-7)",
+  "Substance use", "<i>su_y_mjsre_sum</i>", "Total number and severity of subjective responses for first marijuana use episode.", "All waves (0-7)",
+  
+    # Neighborhood context
+  "Neighborhood context", "<i>le_l_adi__addr1__income_med</i>", "Median family income from the Area Deprivation Index, a neighborhood-level composite measure of socioeconomic disadvantage. Higher values indicate greater neighborhood deprivation.", "Baseline / time-invariant",
+  "Neighborhood context", "<i>le_l_adi__addr1__mortgage_med</i>", "Median monthly mortgage from the Area Deprivation Index, a neighborhood-level composite measure of socioeconomic disadvantage. Higher values indicate greater neighborhood deprivation.", "Baseline / time-invariant",
+  "Neighborhood context", "<i>le_l_svi__addr1__17younger_prcnt</i>", "Percent population estimate of persons 17 and younger from the Social Vulnerability Index, a neighborhood-level composite measure of community vulnerability.", "Baseline / time-invariant",
+  "Neighborhood context", "<i>le_l_densalc__addr1__alc_density__2016</i>", "Estimate of alcohol outlet density based on Census 2016 ZIP Code Business Patterns and NAICS establishments where alcohol could be purchased and/or consumed.", "Baseline / time-invariant"
+)
+
+construct_codebook %>%
+  arrange(
+    factor(
+      construct,
+      levels = c(
+        "Identifiers",
+        "Metrics of Time",
+        "Demographics and household",
+        "Family environment and parenting",
+        "Peers",
+        "Mental health",
+        "Substance use risk",
+        "Substance use"
+      )
+    ),
+    indicator
+  ) %>%
+  kable(
+    format = "html",
+    col.names = c("Construct", "Variable Name", "Variable Description", "Waves Measured"),
+    escape = FALSE
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("hover", "condensed"),
+    full_width = TRUE
+  ) %>%
+  collapse_rows(
+    columns = 1,
+    valign = "top"
+  )
+```
+
+## Note on Session_id
+
+In ABCD 7.0, session_id includes timepoints with S (screener), A (annual
+assessment), and M (midpoint assessment). We maintain only sessions from
+the annual assessment (i.e., ses-#A).
+
+## Note on Viz Helper Functions
+
+Available visualization helper functions:
+
+**plot_nominal()**
+
+Creates a bar chart for a categorical (nominal) variable and displays
+counts and percentages for each category. Categories are ordered by
+frequency and plotted using the project color palette.
+
+*Key arguments:* data = data frame var = categorical variable to plot
+title = optional plot title xlab = optional x-axis label ylab = optional
+y-axis label (default = "Count") show_percent = whether to display
+percentages above bars (default = TRUE)
+
+**plot_distribution()**
+
+Creates a histogram for a single numeric variable and displays N, mean,
+SD, skewness, and kurtosis, along with reference lines at the mean, ±1
+SD, and ±3 SD.
+
+*Key arguments:* data = data frame var = numeric variable to plot title
+= optional plot title xlab = optional x-axis label annotate_x = optional
+x-position for summary statistics
+
+**plot_distribution_by_time()**
+
+Creates faceted histograms by timepoint (or another grouping variable),
+with group-specific summary statistics and reference lines calculated
+separately within each facet.
+
+*Key arguments:* data = data frame var = numeric variable to plot
+time_var = grouping/facet variable title = optional plot title xlab =
+optional x-axis label annotate_x = optional x-position for summary
+statistics
+
+**plot_longitudinal_subset()**
+
+Creates a longitudinal "spaghetti plot" for a random subset of
+participants, families, or other repeated-measures units, with an
+overall LOESS trend line.
+
+*Key arguments:* data = long-format data frame var = outcome variable
+time_var = time variable id_var = participant/family ID sample_n =
+number of IDs to sample (default = 100) seed = random seed for
+reproducibility title, xlab, ylab = optional labels
+
+**plot_cormat_heatmap()**
+
+Creates an upper-triangle Pearson correlation heatmap for a set of
+numeric variables, displaying the correlation coefficient in each cell.
+
+*Key arguments:* wide_subset = data frame containing variables of
+interest
+
+Load in datasets
+
+```{r include=FALSE}
+
+#Load in datasets
+
+## Filepaths
+## For Kristine
+filepath <- "C:/Users/kmarcea/Box/[L2 Sensitive Ext] Marceau BDL/"
+## For Jennifer
+#filepath <- "C:/Users/admin/Box/"
+
+# Demographics, identifiers
+demo <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/ab_p_demo.parquet"), as_data_frame = TRUE)
+stc <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/ab_g_stc.parquet"), as_data_frame = TRUE)
+dyn <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/ab_g_dyn.parquet"), as_data_frame = TRUE)
+zygrat <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/gn_e_zygrat.parquet"), as_data_frame = TRUE)
+genrel <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/gn_y_genrel.parquet"), as_data_frame = TRUE)
+
+# Emotional/Behavioral Risk for SU
+bpm <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/mh_y_bpm.parquet"), as_data_frame = TRUE)
+cbcl <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/mh_p_cbcl.parquet"), as_data_frame = TRUE)
+
+# Positive Affects
+pai <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/mh_y_pai.parquet"), as_data_frame = TRUE)
+
+# Substance Use
+sui <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/su_y_sui.parquet"), as_data_frame = TRUE)
+lowuse <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/su_y_lowuse.parquet"), as_data_frame = TRUE)
+itu <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/su_y_itu.parquet"), as_data_frame = TRUE)
+tlfb <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/su_y_tlfb.parquet"), as_data_frame = TRUE)
+alcsre <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/su_y_alcsre.parquet"), as_data_frame = TRUE)
+nicsre <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/su_y_nicsre.parquet"), as_data_frame = TRUE)
+mjsre <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/su_y_mjsre.parquet"), as_data_frame = TRUE)
+
+# Env/Family Vars
+pm <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/fc_y_pm.parquet"), as_data_frame = TRUE)
+surule <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/su_p_rule.parquet"), as_data_frame = TRUE)
+
+fes <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/fc_y_fes.parquet"), as_data_frame = TRUE)
+
+pbp <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/fc_y_pbp.parquet"), as_data_frame = TRUE)
+
+rpi <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/fc_y_rpi.parquet"), as_data_frame = TRUE)
+
+# Linked external data
+adi <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/le_l_adi.parquet"), as_data_frame = TRUE)
+svi <- read_parquet(file=paste0(filepath,"ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/le_l_svi.parquet"), as_data_frame = TRUE)
+densalc <- read_parquet(file = paste0(filepath, "ABCD/Data/abcd-data-release-7.0/rawdata/phenotype/le_l_densalc.parquet"),as_data_frame = TRUE)
+
+
+
+```
+
+# Demographic Variables
+
+## Dataset(s) & Variables Used Note:
+
+This section creates demographic, family structure, and visit-level
+variables from ABCD parent-report and administrative datasets. These
+variables include caregiver relationship to the child, caregiver marital
+status, household size and composition, the child’s time in another
+household, child race/ethnicity and sex assigned at birth, family and
+birth-event identifiers, family relationship structure, youth age at
+visit, and visit date/time.
+
+**ab_p_demo**
+
+\*ab_p_demo\_\_relation_001\* (formerly demo_prim & demo_prim_l):
+Relationship to the participant: You are the... 1 = Child's biological
+mother, 2 = Child's biological father, 3 = adoptive parent, 4 = Child's
+custodial parent, 5 = other
+
+\*ab_p_demo\_\_marital\_\_slf_001\* (formerly demo_prnt_marital_v2 &
+demo_prnt_marital_v2_l) 1 = Married, 2 = Widowed, 3 = Divorced, 4 =
+Separated, 5 = Never married, 6 = Living with partner, 777 = decline to
+answer
+
+\*ab_p_demo\_\_roster_001\* (formerly demo_roster_v2 &
+demo_roster_v2_l): How many people are living at your address?
+
+\*ab_p_demo\_\_roster_002 through ab_p_demo\_\_roster_015\* (formerly
+fam_roster_2c_v2 through fam_roster_15c_v2 & fam_roster_2c_v2_l through
+fam_roster_15c_v2_l): Person #2 through Person #15 who lives at your
+address, relationship to you. 1 = Spouse; 2 = child-in-law; 3 =
+Biological child; 4 = Other relative; 5 = Adopted child; 6 = Roomer or
+boarder; 7 = Stepchild; 8 = Housemate or roommate; 9 = sibling; 10 =
+Unmarried partner; 11 = parent; 12 = Foster child; 13 = Grandchild; 14 =
+Other nonrelative; 15 = Parent-in-law
+
+\*ab_p_demo\_\_child\_\_time_001\* (formerly demo_child_time_v2 &
+demo_child_time_v2_l): Is there another household in which the child
+spends a significant amount of time? 1 = Yes; 0 = No; 777 = Declined to
+answer
+
+\*ab_p_demo\_\_child\_\_time_001\_\_01\* (formerly demo_child_time2_v2 &
+demo_child_time2_v2_l): About how much time per week does the child
+spend at this other household?
+
+\*ab_p_demo\_\_child\_\_time_001\_\_02\* (formerly demo_child_time3_v2 &
+demo_child_time3_v2_l): Who is the best person to contact about that
+household? 1 = other biological parent; 2 = step mother; 3 = step
+father; 4 = grandmother; 5 = grandfather; 6 = aunt; 7 = uncle; 8 = other
+
+**ab_g_stc**
+
+\*ab_g_stc\_\_cohort_acsps\* Cohort description: Imputed raked propensity weight - The raked propensity weight merges the ACS and ABCD baseline data (with missing data imputed), estimates the propensity model, computes and scales/trims the propensity weights and finally rakes the scaled weights to final ACS control totals by age, sex and race/ethnicity [Based on baseline demographics data]
+
+\*ab_g_stc\_\_cohort_ethnrace\_\_leg\* (formerly race_ethnicity in
+abcd_p_demo): Parent reported race for child. 1 = Hispanic; 2 = White; 3
+= Black; 4 = Asian; 13 = Other
+
+\*ab_g_stc\_\_cohort_race\_\_nih\*: Race (NIH classification reporting 7
+levels) [Based on baseline response; missingness filled in from
+longitudinal responses]
+
+\*ab_g_stc\_\_cohort_sex\* (formerly demo_sex_v2 in abcd_p_demo): Parent
+reported sex assigned at birth. 1=Male, 2=female
+
+\*ab_g_stc\_\_design_id\_\_fam\* (formerly rel_family_id):
+Design/nesting: Family ID - Participants belonging to the same family
+share a family ID (derived based on caregiver information)
+
+\*ab_g_stc\_\_design_id\_\_birth\* (formerly rel_birth_id):
+Design/nesting: Birth event ID - Participants from the same family who
+were born together share a birth event ID (derived based on unique
+birthdates)
+
+\*ab_g_stc\_\_design_famrel\* (formerly rel_relationship):
+Design/nesting: Relationship of the participant in their family
+
+**ab_g_dyn**
+
+\*ab_g_dyn\_\_visit_age\* (formerly demo_brthdat_v2 &
+demo_brthdat_v2_l): Youth's age at the start of the event
+
+\*ab_g_dyn\_\_visit_dtt\* (formerly interview_date): Visit information:
+Date and time at the start of the visit
+
+\*ab_g_dyn__design_site*: Study Site
+
+## Data Cleaning & Variable Creation
+
+```{r demo-vars, message=FALSE}
+
+
+#Subset demo dataset to variables of interest
+s.demo <- c("participant_id","session_id", "ab_p_demo__relation_001","ab_p_demo__marital__slf_001", "ab_p_demo__roster_001", "ab_p_demo__roster_002", "ab_p_demo__roster_003", "ab_p_demo__roster_004", "ab_p_demo__roster_005", "ab_p_demo__roster_006", "ab_p_demo__roster_007", "ab_p_demo__roster_008", "ab_p_demo__roster_009", "ab_p_demo__roster_010", "ab_p_demo__roster_011", "ab_p_demo__roster_012", "ab_p_demo__roster_013", "ab_p_demo__roster_014", "ab_p_demo__roster_015", "ab_p_demo__child__time_001", "ab_p_demo__child__time_001__01", "ab_p_demo__child__time_001__02")
+demo_subset <- demo[s.demo]
+
+#Subset dyn dataset to variables of interest
+s.dyn <- c("participant_id", "session_id", "ab_g_dyn__visit_age", "ab_g_dyn__visit_dtt","ab_g_dyn__design_site")
+dyn_subset <- dyn[s.dyn]
+
+#Subset stc dataset to variables of interest
+s.stc <- c("participant_id", "ab_g_stc__cohort_ethnrace__leg", "ab_g_stc__cohort_race__nih","ab_g_stc__cohort_acsps", "ab_g_stc__cohort_sex", "ab_g_stc__design_id__fam", "ab_g_stc__design_id__birth", "ab_g_stc__design_famrel")
+stc_subset <- stc[s.stc]
+
+
+#merge select var datasets for demographics of demo_subset, stc_subset, & dyn_subset
+demo_datavars <- list(demo_subset, dyn_subset)
+demo_merged <- Reduce(function(x, y) merge(x, y, by = c("participant_id","session_id"), all = TRUE), demo_datavars)
+
+#As stc doesn't have a session_id var, merge only by participant_id
+#merge dataframes
+demo_m <- merge(demo_merged, stc_subset, by=c("participant_id"), all = TRUE)
+
+#create multigenerational home variable If parent (11) or grandchild (13) or parent-in-law (15) selected, then 1 (i.e., parent/guardian and child live with ), all else 0. 
+demo_m <- demo_m %>% 
+  mutate(multigen = case_when(
+    (ab_p_demo__roster_002 == 11 | ab_p_demo__roster_002 == 13 | ab_p_demo__roster_002 == 15) ~ 1, 
+    (ab_p_demo__roster_003 == 11 | ab_p_demo__roster_003 == 13 | ab_p_demo__roster_003 == 15) ~ 1,
+    (ab_p_demo__roster_004 == 11 | ab_p_demo__roster_004 == 13 | ab_p_demo__roster_004 == 15) ~ 1,
+    (ab_p_demo__roster_005 == 11 | ab_p_demo__roster_005 == 13 | ab_p_demo__roster_005 == 15) ~ 1,
+    (ab_p_demo__roster_006 == 11 | ab_p_demo__roster_006 == 13 | ab_p_demo__roster_006 == 15) ~ 1,
+    (ab_p_demo__roster_007 == 11 | ab_p_demo__roster_007 == 13 | ab_p_demo__roster_007 == 15) ~ 1,
+    (ab_p_demo__roster_008 == 11 | ab_p_demo__roster_008 == 13 | ab_p_demo__roster_008 == 15) ~ 1,
+    (ab_p_demo__roster_009 == 11 | ab_p_demo__roster_009 == 13 | ab_p_demo__roster_009 == 15) ~ 1,
+    (ab_p_demo__roster_010 == 11 | ab_p_demo__roster_010 == 13 | ab_p_demo__roster_010 == 15) ~ 1,
+    (ab_p_demo__roster_011 == 11 | ab_p_demo__roster_011 == 13 | ab_p_demo__roster_011 == 15) ~ 1,
+    (ab_p_demo__roster_012 == 11 | ab_p_demo__roster_012 == 13 | ab_p_demo__roster_012 == 15) ~ 1,
+    (ab_p_demo__roster_013 == 11 | ab_p_demo__roster_013 == 13 | ab_p_demo__roster_013 == 15) ~ 1,
+    (ab_p_demo__roster_014 == 11 | ab_p_demo__roster_014 == 13 | ab_p_demo__roster_014 == 15) ~ 1,
+    (ab_p_demo__roster_015 == 11 | ab_p_demo__roster_015 == 13 | ab_p_demo__roster_015 == 15) ~ 1,
+    TRUE ~ 0))
+
+demo_m <- demo_m %>% 
+  mutate(housepop = ab_p_demo__roster_001)
+
+#Drop roster variables that are not longer needed
+s.demor <- c("participant_id", "session_id", "ab_g_dyn__visit_dtt", "ab_g_dyn__visit_age", "ab_p_demo__relation_001", "ab_p_demo__marital__slf_001", "multigen", "ab_p_demo__child__time_001", "ab_p_demo__child__time_001__01", "ab_p_demo__child__time_001__02", "ab_g_stc__cohort_ethnrace__leg", "ab_g_stc__cohort_race__nih", "ab_g_stc__cohort_sex", "ab_g_stc__design_id__fam", "ab_g_stc__design_id__birth", "ab_g_stc__design_famrel","housepop","ab_g_dyn__design_site")
+demo_mf <- demo_m[s.demor]
+
+```
+
+## Descriptive Statistics
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+#Make a wide dataset
+demowide = demo_mf %>%
+  pivot_wider(
+    id_cols = "participant_id", 
+    names_from = "session_id", 
+    values_from = c("ab_g_dyn__visit_age", "ab_p_demo__relation_001", "ab_p_demo__marital__slf_001", "multigen","ab_g_stc__cohort_ethnrace__leg",  "ab_g_stc__cohort_sex","ab_g_dyn__design_site"))
+
+kbl(psych::describe(demowide), caption = "Demographic Summary Statistics") %>% 
+  kable_minimal(c("striped", "hover","condensed","responsive")) %>%
+  scroll_box(width = "100%")
+```
+
+## Viz: Frequency of Participants Sex At Each Timepoint
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+subset_demo.sex<-subset(demo_mf, !is.na(ab_g_stc__cohort_sex))
+
+#demo_sex_v2: Parent reported sex assigned at birth. 1=Male, 2=female, 3=intersex-male, 4=intersex-female
+
+ggplot(subset_demo.sex, aes(x = session_id, fill = factor(ab_g_stc__cohort_sex))) + 
+  geom_bar(color = "black", position = "dodge") +
+  scale_fill_manual(values = c("black","#CFB991", "#DAAA00", "#EBD99F"), labels = c("Male", "Female", "Intersex Male", "Intersex Female")) +
+  labs(x = "Timepoint", y = "Frequency",
+       fill = "Groups")+
+  theme_minimal()
+
+plot_nominal(
+  data = subset_demo.sex,
+  var = ab_g_stc__cohort_sex,
+  title = "Sex Distributions Across All Waves",
+  xlab = "Sex"
+)
+
+```
+
+## Viz: Frequency of Participants Within Race-Ethnic Groups At Each Timepoint
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+subset_demo.race<-subset(demo_mf, !is.na(ab_g_stc__cohort_ethnrace__leg))
+
+#race_ethnicity: 1 = Hispanic; 2 = White; 3 = Black; 4 = Asian; 13 = Other
+
+subset_demo.race <- subset_demo.race %>%
+  mutate(
+    race_ethn_label = factor(
+      ab_g_stc__cohort_ethnrace__leg,
+      levels = c(1, 2, 3, 4, 13),
+      labels = c("Hispanic", "White", "Black", "Asian", "Other")
+    )
+  )
+
+ggplot(subset_demo.race, aes(x = session_id, fill = race_ethn_label)) + 
+  geom_bar(color = "black", position = "dodge") +
+  scale_fill_manual(
+    values = c("Hispanic" = "black","White" = "#8E6F3E","Black" = "#DAAA00","Asian" = "#DDB945", "Other" = "#EBD99F")) +labs(x = "Timepoint",y = "Frequency",fill = "Groups") +
+  theme_minimal()
+
+plot_nominal(
+  data = subset_demo.race,
+  var = race_ethn_label,
+  title = "Race/Ethnicity Distributions Across All Waves",
+  xlab = "Race/Ethnicity"
+)
+
+
+```
+
+## Viz: Frequency of Reporting Parent's Marital Status At Each Timepoint
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+subset_demo.marital<-subset(demo_mf, !is.na(ab_p_demo__marital__slf_001))
+subset_demo.marital <- subset(subset_demo.marital, ab_p_demo__marital__slf_001 != 777)
+
+subset_demo.marital$marital_label <- factor(
+  subset_demo.marital$ab_p_demo__marital__slf_001,
+  levels = c(1, 2, 3, 4, 5, 6),
+  labels = c("Married", "Widowed", "Divorced", "Separated", 
+             "Never married", "Living with partner")
+)
+
+#marital: marital status of the reporting parent. 1 = Married; 2 = Widowed ; 3 = Divorced; 4 = Separated; 5 = Never married; 6 = Living with partner; 777 = Decline to answer
+
+ggplot(subset_demo.marital, aes(x = session_id, fill = factor(ab_p_demo__marital__slf_001))) + 
+  geom_bar(color = "black", position = "dodge") +
+  scale_fill_manual(values = c("black","#8E6F3E", "#DAAA00", "#DDB945", "#CFB991", "#EBD99F"), labels = c("Married", "Widowed", "Divorced", "Separated", "Never married", "Living with partner")) +
+  labs(x = "Timepoint", y = "Frequency",
+       fill = "Groups")+
+  theme_minimal()
+
+
+plot_nominal(
+  data = subset_demo.marital,
+  var = marital_label,
+  title = "Caregiver Marital Status Distributions Across All Waves",
+  xlab = "Marital Status"
+)
+```
+
+## Viz: Frequency of Participants Living Within a Multigenerational Home
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+subset_demo.multigen<-subset(demo_mf, !is.na(multigen))
+
+#multigen: Created variable that denotes child lives in a multigenerational home (1) or not (0).
+
+
+subset_demo.multigen$multigen_label <- factor(
+  subset_demo.multigen$multigen,
+  levels = c(0, 1),
+  labels = c(
+    "Not Living in a Multigenerational Home",
+    "Living in a Multigenerational Home"
+  )
+)
+
+ggplot(subset_demo.multigen, aes(x = session_id, fill = multigen_label)) + 
+  geom_bar(color = "black", position = "dodge") +
+  scale_fill_manual(values = c("Not Living in a Multigenerational Home" = "black","Living in a Multigenerational Home" = "#CFB991")) +
+  labs(x = "Timepoint",y = "Frequency", fill = "Groups"
+  ) +
+  theme_minimal()
+
+plot_nominal(
+  data = subset_demo.multigen,
+  var = multigen_label,
+  title = "Multigenerational Household Distributions Across All Waves",
+  xlab = "Multigenerational Household Status"
+)
+
+```
+
+# Child Emotional/Behavioral Risk and Protective Factors
+
+Child internalizing and externalizing behaviors were measured via
+checklist measures.
+
+## Dataset(s) & Variables
+
+**mh_y_bpm**: Youth-reported externalizing and internalizing symptoms
+
+Externalizing: Taken from 7 questions on the Brief Problem Monitor (BPM)
+which were measured on a 3-point Likert scale with 0=not true, 2 =
+somewhat true, 2= very true, 777 = decline to answer, 999 = don't know.
+
+\*mh_y_bpm\_\_ext_001\* (formerly bpm_2_y): I argue a lot
+
+\*mh_y_bpm\_\_ext_002\* (formerly bpm_6_y): I destroy things belonging
+to others
+
+\*mh_y_bpm\_\_ext_003\* (formerly bpm_7_y): I disobey my parents
+
+\*mh_y_bpm\_\_ext_004\* (formerly bpm_8_y): I disobey at school. Please
+select " Not True " if you are not in school at the time of this
+assessment.
+
+\*mh_y_bpm\_\_ext_005\* (formerly bpm_15_y): I am stubborn
+
+\*mh_y_bpm\_\_ext_006\* (formerly bpm_16_y): I have a hot temper
+
+\*mh_y_bpm\_\_ext_007\* (formerly bpm_17_y): I threaten to hurt people
+
+\*mh_y_bpm\_\_ext_sum\* (formerly bpm_y_scr_external_r): Sum
+[Validation: No more than 0 missing or declined]
+
+\*mh_y_bpm\_\_ext_tscore\* (formerly bpm_y_scr_external_t): T-score
+[Validation: No more than 0 missing or declined]
+
+\*mh_y_bpm\_\_ext_nm\* (formerly bpm_y_scr_external_nm): Number missing
+(externalizing)
+
+Internalizing: Taken from 6 questions on the Brief Problem Monitor (BPM)
+which were measured on a 3-point Likert scale with 0 = not true, 1 =
+somewhat true, 2 = very true, 777 = decline to answer, 999 = don't know.
+
+\*mh_y_bpm\_\_int_001\*: I feel worthless or inferior.
+
+\*mh_y_bpm\_\_int_002\*: I am too fearful or anxious.
+
+\*mh_y_bpm\_\_int_003\*: I feel too guilty.
+
+\*mh_y_bpm\_\_int_004\*: I am self-conscious or easily embarrassed.
+
+\*mh_y_bpm\_\_int_005\*: I am unhappy, sad, or depressed.
+
+\*mh_y_bpm\_\_int_006\*: I worry a lot.
+
+\*mh_y_bpm\_\_int_sum\*: Sum [Validation: No more than 0 missing or
+declined]
+
+\*mh_y_bpm\_\_int_tscore\*: T-score [Validation: No more than 0 missing
+or declined]
+
+\*mh_y_bpm\_\_int_nm\*: Number missing (internalizing)
+
+**mh_p_cbcl**: Parent-reported externalizing and internalizing symptoms
+
+Parent-reported externalizing symptoms were taken from the Child
+Behavior Checklist (CBCL), which includes rule-breaking and aggressive
+subscales. Parents indicted responses on a 3-point Likert scale with
+0=not true and 2= very true. In order to match CBCL with BPM, we summed
+the rule-breaking and aggressive subscales of the CBCL to create an
+externalizing composite that excludes attention problems.
+
+\*mh_p_cbcl\_\_synd\_\_ext_sum\*: Child Behavior Checklist [Parent]
+(Syndrome Scale - Externalizing): Sum of the rule-breaking behavior and
+aggressive behavior syndrome scales, excluding attention problems.
+
+\*mh_p_cbcl\_\_synd\_\_ext_nm\*: Child Behavior Checklist [Parent]
+(Syndrome Scale - Externalizing): Number missing.
+
+Parent-reported internalizing symptoms were taken from the Child
+Behavior Checklist (CBCL), which includes anxious/depressed,
+withdrawn/depressed, and somatic complaints syndrome scales. Parents
+indicated responses on a 3-point Likert scale with 0 = not true, 1 =
+somewhat or sometimes true, and 2 = very true.
+
+\*mh_p_cbcl\_\_synd\_\_int_sum\*: Child Behavior Checklist [Parent]
+(Syndrome Scale - Internalizing): Sum of the anxious/depressed,
+withdrawn/depressed, and somatic complaints syndrome scales.
+
+\*mh_p_cbcl\_\_synd\_\_int_nm\*: Child Behavior Checklist [Parent]
+(Syndrome Scale - Internalizing): Number missing.
+
+Parent-reported attention problems were taken from the Child Behavior
+Checklist (CBCL) attention problems syndrome scale. Parents indicated
+responses on a 3-point Likert scale with 0 = not true, 1 = somewhat or
+sometimes true, and 2 = very true.
+
+\*mh_p_cbcl\_\_synd\_\_attn_sum\*: Child Behavior Checklist [Parent]
+(Syndrome Scale - Attention problems): Sum [Validation: No more than 0
+missing or declined]
+
+\*mh_p_cbcl\_\_synd\_\_attn_nm\*: Child Behavior Checklist [Parent]
+(Syndrome Scale - Attention problems): Number missing
+
+**mh_y_pai**:Youth-reported positive affect
+
+Youth-reported positive affect was assessed using the NIH Toolbox
+Positive Affect Items [Youth]. Items capture the extent to which youth
+report positive emotional experiences. The sum score was retained as an
+indicator of youth positive affect.
+
+*mh_y_pai_sum*: NIH Toolbox - Positive Affect Items [Youth]: Sum
+[Validation: None missing or declined]
+
+*mh_y_pai_nm*: NIH Toolbox - Positive Affect Items [Youth]: Number
+missing
+
+
+```{r , message=FALSE}
+mental_health_codebook <- tibble::tribble(
+  ~construct, ~indicator, ~description, ~waves_measured,
+
+  "Mental health", "<i>mh_y_bpm__ext_sum</i>",
+  "Youth-reported Brief Problem Monitor (BPM) externalizing symptoms sum score. Based on 7 items assessing arguing, rule-breaking, aggression, stubbornness, temper, and threats toward others.",
+  "Waves 1-6",
+
+  "Mental health", "<i>mh_y_bpm__ext_tscore</i>",
+  "Youth-reported Brief Problem Monitor (BPM) externalizing symptoms T-score.",
+  "Waves 1-6",
+
+  "Mental health", "<i>mh_y_bpm__int_sum</i>",
+  "Youth-reported Brief Problem Monitor (BPM) internalizing symptoms sum score. Based on 6 items assessing anxiety, guilt, embarrassment, sadness/depression, worthlessness, and worry.",
+  "Waves 1-6",
+
+  "Mental health", "<i>mh_y_bpm__int_tscore</i>",
+  "Youth-reported Brief Problem Monitor (BPM) internalizing symptoms T-score.",
+  "Waves 1-6",
+
+  "Mental health", "<i>mh_p_cbcl__synd__ext_sum</i>",
+  "Parent-reported Child Behavior Checklist (CBCL) externalizing syndrome scale sum score. Composite of the rule-breaking behavior and aggressive behavior syndrome scales, excluding attention problems.",
+  "All waves (0-7)",
+
+  "Mental health", "<i>mh_p_cbcl__synd__int_sum</i>",
+  "Parent-reported Child Behavior Checklist (CBCL) internalizing syndrome scale sum score. Composite of the anxious/depressed, withdrawn/depressed, and somatic complaints syndrome scales.",
+  "All waves (0-7)",
+
+  "Mental health", "<i>mh_p_cbcl__synd__attn_sum</i>",
+  "Parent-reported Child Behavior Checklist (CBCL) attention problems syndrome scale sum score.",
+  "All waves (0-7)",
+
+  "Positive affect", "<i>mh_y_pai_sum</i>",
+  "Youth-reported NIH Toolbox Positive Affect Items sum score. Higher values indicate greater positive emotional experiences and positive affect.",
+  "Waves 1, 3, and 5"
+)
+
+mental_health_codebook %>%
+  dplyr::arrange(
+    factor(
+      construct,
+      levels = c("Mental health", "Positive affect")
+    ),
+    indicator
+  ) %>%
+  kableExtra::kbl(
+    format = "html",
+    col.names = c("Construct", "Variable Name", "Variable Description", "Waves Measured"),
+    escape = FALSE
+  ) %>%
+  kableExtra::kable_styling(
+    bootstrap_options = c("hover", "condensed"),
+    full_width = TRUE
+  ) %>%
+  kableExtra::collapse_rows(
+    columns = 1,
+    valign = "top"
+  )
+
+```
+
+
+## Data Cleaning & Variable Creation
+
+```{r extdata, message=FALSE}
+
+#Subset brief problem monitor dataset to variables of interest
+s.bpm <- c("participant_id", "session_id", "mh_y_bpm__ext_sum", "mh_y_bpm__int_sum")
+bpm_subset <- bpm[s.bpm]
+
+#Subset CBCL dataset to variables of interest
+s.cbcl <- c("participant_id", "session_id", "mh_p_cbcl__synd__ext_sum", "mh_p_cbcl__synd__int_sum", "mh_p_cbcl__synd__attn_sum")
+cbcl_subset <- cbcl[s.cbcl]
+
+# Subset PAI dataset to variables of interest
+s.pai <- c("participant_id", "session_id","mh_y_pai_sum")
+pai_subset <- pai[s.pai]
+
+#merge
+mh_checklists <- merge(cbcl_subset, bpm_subset, by=c("participant_id", "session_id"), all = TRUE)
+mh_checklists <- merge(mh_checklists,pai_subset,by = c("participant_id", "session_id"),all = TRUE)
+
+#Drop assessments that are not annual assessments (indicated by M at the end of the session_id)
+mh <- mh_checklists %>% 
+  filter(session_id == "ses-00A" | session_id == "ses-01A" | session_id == "ses-02A" | session_id == "ses-03A" | session_id == "ses-04A" | session_id == "ses-05A" | session_id == "ses-06A")
+
+mh = mh %>% 
+  mutate(timepoint = str_extract(session_id, "\\d+") %>% as.integer())
+
+```
+
+## Descriptive Statistics
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+#Make a wide dataset
+mhwide = mh %>%
+  pivot_wider(
+    id_cols = "participant_id", 
+    names_from = "timepoint", 
+    values_from = c("mh_y_bpm__ext_sum", "mh_y_bpm__int_sum","mh_p_cbcl__synd__ext_sum", "mh_p_cbcl__synd__int_sum", "mh_p_cbcl__synd__attn_sum","mh_y_pai_sum"))
+
+kbl(psych::describe(mhwide), caption = "Child and Parent Reported Internalizing and Externalizing Summary Statistics") %>% 
+  kable_minimal(c("striped", "hover","condensed","responsive")) %>%
+  scroll_box(width = "100%")
+```
+
+## Viz: Distributions across all waves
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+plot_distribution(
+     data = mh,
+     var = mh_y_bpm__ext_sum,
+     title = "Child Reported Externalizing",
+     xlab = "Externalizing Problems",
+     annotate_x = 5
+   )
+
+plot_distribution(
+     data = mh,
+     var = mh_y_bpm__int_sum,
+     title = "Child Reported Internalizing",
+     xlab = "Internalizing Problems",
+     annotate_x = 5
+   )
+
+plot_distribution(
+  data = mh,
+  var = mh_p_cbcl__synd__ext_sum,
+  title = "Parent Reported Externalizing",
+  xlab = "Externalizing Problems",
+  annotate_x = 10
+)
+
+plot_distribution(
+  data = mh,
+  var = mh_p_cbcl__synd__int_sum,
+  title = "Parent Reported Internalizing",
+  xlab = "Internalizing Problems",
+  annotate_x = 15
+)
+
+plot_distribution(
+  data = mh,
+  var = mh_p_cbcl__synd__attn_sum,
+  title = "Parent Reported Attention Problems",
+  xlab = "Attention Problems",
+  annotate_x = 8
+)
+
+plot_distribution(
+  data = mh,
+  var = mh_y_pai_sum,
+  title = "Child Reported Positive Affect",
+  xlab = "Positive Affect",
+  annotate_x = 10
+)
+
+```
+
+## Viz: Distributions by wave
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+plot_distribution_by_time(
+  data = mh,
+  var = mh_y_bpm__ext_sum,
+  time_var = session_id,
+  title = "Child Reported Externalizing",
+  xlab = "Externalizing Problems",
+  annotate_x = 5
+)
+
+plot_distribution_by_time(
+  data = mh,
+  var = mh_y_bpm__int_sum,
+  time_var = session_id,
+  title = "Child Reported Internalizing by Wave",
+  xlab = "Internalizing Problems",
+  annotate_x = 5
+)
+
+plot_distribution_by_time(
+  data = mh,
+  var = mh_p_cbcl__synd__ext_sum,
+  time_var = session_id,
+  title = "Parent Reported Externalizing by Wave",
+  xlab = "Externalizing Problems",
+  annotate_x = 10
+)
+
+plot_distribution_by_time(
+  data = mh,
+  var = mh_p_cbcl__synd__int_sum,
+  time_var = session_id,
+  title = "Parent Reported Internalizing by Wave",
+  xlab = "Internalizing Problems",
+  annotate_x = 10
+)
+
+plot_distribution_by_time(
+  data = mh,
+  var = mh_p_cbcl__synd__attn_sum,
+  time_var = session_id,
+  title = "Parent Reported Attention Problems by Wave",
+  xlab = "Attention Problems",
+  annotate_x = 5
+)
+
+plot_distribution_by_time(
+  data = mh,
+  var = mh_y_pai_sum,
+  time_var = session_id,
+  title = "Child Reported Positive Affect by Wave",
+  xlab = "Positive Affect",
+  annotate_x = 20
+)
+```
+
+## Viz: Longitudinal Plots
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+plot_longitudinal_subset(
+  data = mh,
+  var = mh_y_bpm__ext_sum,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 100,
+  seed = 2025,  
+  title = "Child Reported Externalizing over Time",
+  xlab = "Time",
+  ylab = "Externalizing Problems"
+)
+
+plot_longitudinal_subset(
+  data = mh,
+  var = mh_y_bpm__int_sum,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 100,
+  seed = 2025,
+  title = "Child Reported Internalizing over Time",
+  xlab = "Time",
+  ylab = "Internalizing Problems"
+)
+
+plot_longitudinal_subset(
+  data = mh,
+  var = mh_p_cbcl__synd__ext_sum,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 100,
+  seed = 2025,
+  title = "Parent Reported Externalizing over Time",
+  xlab = "Time",
+  ylab = "Externalizing Problems"
+)
+
+plot_longitudinal_subset(
+  data = mh,
+  var = mh_p_cbcl__synd__int_sum,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 100,
+  seed = 2025,
+  title = "Parent Reported Internalizing over Time",
+  xlab = "Time",
+  ylab = "Internalizing Problems"
+)
+
+plot_longitudinal_subset(
+  data = mh,
+  var = mh_p_cbcl__synd__attn_sum,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 100,
+  seed = 2025,
+  title = "Parent Reported Attention Problems over Time",
+  xlab = "Time",
+  ylab = "Attention Problems"
+)
+
+plot_longitudinal_subset(
+  data = mh,
+  var = mh_y_pai_sum,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 100,
+  seed = 2025,
+  title = "Child Reported Positive Affect over Time",
+  xlab = "Time",
+  ylab = "Positive Affect"
+)
+```
+
+# Substance Use
+
+We constructed uptake continuum measures for 1) alcohol, 2) tobacco, and
+3) marijuana.
+
+Continuum scoring depended upon items available at each assessment
+(e.g., follow-ups ask about the last 12 months, baseline is lifetime).
+Categories were collapsed or expanded depending on rates of endorsement
+but generally follow patterns of milestone attainment.
+
+## Datasets & Variables
+
+Alcohol
+
+**Su_y_sui**
+
+\*su_y_sui\_\_hrd\_\_alc_001\* (formerly tlfb_alc & tlfb_alc_l):Have you
+heard of----alcohol, such as beer, wine, or liquor? 0 = No; 1 = Yes
+(NOTE: full data only available for ses-00A, 409 responses available for
+ses-01A, 140 responses available for ses-02A)
+\*su_y_sui\_\_use\_\_alc_001\* & \*su_y_sui\_\_use\_\_alc_001\_\_l\*
+(formerly tlfb_alc_use & tlfb_alc_use_l): Have you ever used: A full
+drink of beer, wine or liquor (rum, vodka, gin, whiskey) 0 = No; 1 = Yes
+
+**su_y_lowuse**
+
+\*su_y_lowuse\_\_isip_002\* & \*su_y_lowuse\_\_isip_002\_\_l\*: A sip of
+alcohol such as beer, wine or liquor (rum, vodka, gin, whiskey).0 = No;
+1 = Yes
+
+**su_y_itu**
+
+\*su_y_itu\_\_alc_001\* (formerly path_alc_youth2 & path_alc_youth2_l):
+Have you ever been curious about drinking alcohol? 1=Very curious; 2
+Somewhat curious; 3 = A little curious; 4 = Not at all curious; 999=
+Don’t know; 777 = Refused to answer \*su_y_itu\_\_alc_002\* (formerly
+path_alc_youth5 & path_alc_youth5_l): Do you think you will try alcohol
+soon? 1 = Definitely yes; 2 = Probably yes; 3 = Probably not; 4=
+Definitely not; 999= Don’t know; 777 = Refused to answer
+\*su_y_itu\_\_alc_003\* (formerly path_alc_youth8 & path_alc_youth8_l):
+If one of your best friends were to offer you alcohol, would you try it?
+1 = definitely yes; 2 = probably yes; 3 = Probably Not; 4 = definitely
+not; 999= Don’t know; 777 = Refused to answer
+
+**su_y_tlfb**
+
+\*su_y_tlfb\_\_alc\_\_binge_ud\* (formerly tlfb_cal_scr_num_bde):
+Alcohol - Binge episodes: Number of use days \*su_y_tlfb\_\_alc_ud\*
+(formerly tlfb_cal_scr_alc_ud): Alcohol: Number of use days
+\*su_y_tlfb\_\_alc_mean\* (formerly tlfb_cal_scr_alc_avg): Alcohol:
+Average dose
+
+**su_y_alcsre**
+
+\*su_y_alcsre\_\_6mo_count\* (formerly subj_resp_alc_total_6mo &
+subj_resp_alc_total_6mo_i): Number of subjective experiences from
+drinking alcohol during in the past 6 months
+\*su_y_alcsre\_\_hvy_count\* (formerly subj_resp_alc_total_heavy &
+subj_resp_alc_total_heavy_i): Number of subjective experiences from
+drinking alcohol during their heaviest drinking period.
+
+Tobacco
+
+**Su_y_sui**
+
+\*su_y_sui\_\_hrd\_\_nic_001\* (formerly tlfb_tob & tlfb_tob_l): Have
+you heard of tobacco products, such as cigarettes, smokeless tobacco,
+cigars, hookah, electronic or e-cigarettes, or Juul? 0 = No; 1 = Yes
+(NOTE: full data only available for ses-00A, 712 reponses for ses-01A,
+266 responses for ses-02A) \*su_y_sui\_\_use\_\_nic\_\_cig_001\* &
+\*su_y_sui\_\_use\_\_nic\_\_cig_001\_\_l\* (formerly tlfb_cig_use &
+tlfb_cig_use_l): Tobacco cigarette - more than just a puff.0 = No; 1 =
+Yes
+
+**su_y_lowuse**
+
+\*su_y_lowuse\_\_nic_001\* & \*su_y_lowuse\_\_nic_001\_\_l\* (formerly
+first_nicotine_1 & first_nicotine_1_l): Have you had a puff of a
+cigarette, electronic nicotine or vaping products, such as e-cigarettes,
+vape pens, JUULs, hookah, cigar or pipe. 0 = No; 1 = Yes
+
+**su_y_itu**
+
+\*su_y_itu\_\_nic_001\* (formerly path_alc_youth1 & path_alc_youth1_l):
+Have you ever been curious about using a tobacco product such as
+cigarettes, e-cigarettes, hookah, or cigars? 1 = Very curious; 2 =
+Somewhat curious; 3 = A little curious; 4 = Not at all curious; 999=
+Don’t know; 777 = Refused to answer \*su_y_itu\_\_nic_002\* (formerly
+path_alc_youth4 & path_alc_youth4_l): Do you think you will try a
+tobacco product soon? 1 = Definitely yes; 2 = Probably yes; 3 = Probably
+not; 4 = Definitely not; 999= Don’t know; 777 = Refused to answer
+\*su_y_itu\_\_nic_003\* (formerly path_alc_youth7 & path_alc_youth7_l):
+If one of your best friends were to offer you a tobacco product, would
+you try it? 1 = Definitely yes; 2 = Probably yes; 3 = Probably not; 4 =
+Definitely not; 999= Don’t know; 777 = Refused to answer
+
+**su_y_tlfb**
+
+\*su_y_tlfb\_\_nic\_\_cig_mean\* (formerly tlfb_cal_scr_cig_avg):
+Nicotine - Cigarettes: Average dose \*su_y_tlfb\_\_nic\_\_cig_ud\*
+(formerly tlfb_cal_scr_cig_ud): Nicotine - Cigarettes: Number of use
+days
+
+**su_y_nicsre**
+
+\*su_y_nicsre\_\_cig_sum\* (formerly res_tobacco_total_cig &
+res_tobacco_total_cig_i): Total intensity of positive and negative
+effects of first cigarette use.
+
+Marijuana
+
+**Su_y_sui**
+
+\*su_y_sui\_\_hrd\_\_mj_001\* (formerly tlfb_mj & tlfb_mj_l): Have you
+ever heard of marijuana, weed, pot, blunts, dabs, marijuana drinks or
+food with marijuana? 0 = No; 1 = Yes (NOTE: full data only available for
+ses-00A, 4888 response available for ses-01A, 2375 responses available
+for ses-02A) \*su_y_sui\_\_use\_\_mj\_\_puff_001\* &
+\*su_y_sui\_\_use\_\_mj\_\_puff_001\_\_l\* (formerly tlfb_mj_puff &
+tlfb_mj_puff_l): Have you ever used: A puff or eaten any marijuana, also
+called pot, grass, weed or ganja? 0 = No; 1 = Yes
+\*su_y_sui\_\_use\_\_mj\_\_smoke_001\* &
+\*su_y_sui\_\_use\_\_mj\_\_smoke_001\_\_l\* (formerly tlfb_mj_use &
+tlfb_mj_use_l): Have you ever used: Smoked marijuana, also called pot,
+grass, weed, ganja - more than just a puff? 0 = No; 1 = Yes
+
+**su_y_tlfb**
+
+\*su_y_tlfb\_\_mj\_\_smoke_mean\* (formerly tlfb_cal_scr_smj_avg):
+Average smoked MJ on use days \*su_y_tlfb\_\_mj\_\_smoke_ud\* (formerly
+tlfb_cal_scr_smj_ud): Marijuana - Smoked: Number of use days
+
+**su_y_itu**
+
+\*su_y_itu\_\_mj_001\* (formerly path_alc_youth3 & path_alc_youth3_l):
+Have you ever been curious about trying marijuana? 1 = Very curious; 2 =
+Somewhat curious; 3 = A little curious; 4 = Not at all curious; 999=
+Don’t know; 777 = Refused to answer \*su_y_itu\_\_mj_002\* (formerly
+path_alc_youth6 & path_alc_youth6_l): Do you think you will try
+marijuana soon? 1 = Definitely yes; 2 = Probably yes; 3 = Probably not;
+4 = Definitely not; 999= Don’t know; 777 = Refused to answer
+\*su_y_itu\_\_mj_003\* (formerly path_alc_youth9 & path_alc_youth9_l):
+If one of your best friends were to offer you marijuana, would you try
+it? 1 = Definitely yes; 2 = Probably yes; 3 = Probably not; 4 =
+Definitely not; 999= Don’t know; 777 = Refused to answer
+
+**su_y_mjsre**
+
+*su_y_mjsre_sum* (formerly sub_res_mj_total & sub_res_mj_total_i): total
+number and severity of subjective responses for first marijuana use
+episode.
+
+## Data Cleaning
+
+```{r sucleaning, message=FALSE}
+
+
+#Subset sui dataset to variables of interest
+s.sui <- c("participant_id", "session_id", "su_y_sui__hrd__alc_001", "su_y_sui__use__alc_001", "su_y_sui__use__alc_001__l", "su_y_sui__hrd__nic_001", "su_y_sui__use__nic__cig_001", "su_y_sui__use__nic__cig_001__l", "su_y_sui__hrd__mj_001", "su_y_sui__use__mj__puff_001", "su_y_sui__use__mj__puff_001__l", "su_y_sui__use__mj__smoke_001", "su_y_sui__use__mj__smoke_001__l")
+sui_subset <- sui[s.sui]
+
+#Subset lowuse dataset to variables of interest
+s.lowuse <- c("participant_id", "session_id", "su_y_lowuse__isip_002", "su_y_lowuse__isip_002__l", "su_y_lowuse__nic_001", "su_y_lowuse__nic_001__l")
+lowuse_subset <- lowuse[s.lowuse]
+
+#Subset intention to use (itu) dataset to variables of interest
+s.itu <- c("participant_id", "session_id", "su_y_itu__alc_001", "su_y_itu__alc_002", "su_y_itu__alc_003", "su_y_itu__nic_001", "su_y_itu__nic_002", "su_y_itu__nic_003", "su_y_itu__mj_001", "su_y_itu__mj_002", "su_y_itu__mj_003")
+itu_subset <- itu[s.itu]
+
+#Subset tlfb dataset to variables of interest
+s.tlfb <- c("participant_id", "session_id", "su_y_tlfb__alc__binge_ud", "su_y_tlfb__alc_ud", "su_y_tlfb__alc_mean", "su_y_tlfb__nic__cig_mean", "su_y_tlfb__nic__cig_ud", "su_y_tlfb__mj__smoke_mean", "su_y_tlfb__mj__smoke_ud")
+tlfb_subset <- tlfb[s.tlfb]
+
+#Subset subjective experiences dataset to variables of interest
+#alcohol
+s.alcsre <- c("participant_id", "session_id", "su_y_alcsre__6mo_count", "su_y_alcsre__hvy_count")
+alcsre_subset <- alcsre[s.alcsre]
+
+#Tobacco
+s.nicsre <- c("participant_id", "session_id", "su_y_nicsre__cig_sum")
+nicsre_subset <- nicsre[s.nicsre]
+
+#Marijuana
+s.mjsre <- c("participant_id", "session_id", "su_y_mjsre_sum")
+mjsre_subset <- mjsre[s.mjsre]
+
+#combine all substance use variable datasets
+substance_datavars <- list(sui_subset, lowuse_subset, itu_subset, tlfb_subset, alcsre_subset, nicsre_subset, mjsre_subset)
+su_merged <- Reduce(function(x, y) merge(x, y, by = c("participant_id","session_id"), all = TRUE), substance_datavars)
+
+#combine baseline and longitudinal variables
+su_merged1 <- su_merged %>% 
+  mutate(fulldrink = if_else(is.na(su_y_sui__use__alc_001), su_y_sui__use__alc_001__l, su_y_sui__use__alc_001)) %>% 
+  mutate(sipalc = if_else(is.na(su_y_lowuse__isip_002), su_y_lowuse__isip_002__l, su_y_lowuse__isip_002)) %>% 
+  mutate(puffnic = if_else(is.na(su_y_lowuse__nic_001), su_y_lowuse__nic_001__l, su_y_lowuse__nic_001)) %>% 
+  mutate(fullnic = if_else(is.na(su_y_sui__use__nic__cig_001), su_y_sui__use__nic__cig_001__l, su_y_sui__use__nic__cig_001))%>% 
+  mutate(puffmj = if_else(is.na(su_y_sui__use__mj__puff_001), su_y_sui__use__mj__puff_001__l, su_y_sui__use__mj__puff_001)) %>% 
+  mutate(fullmj = if_else(is.na(su_y_sui__use__mj__smoke_001), su_y_sui__use__mj__smoke_001__l, su_y_sui__use__mj__smoke_001))
+
+#Change path variables with 999 and 777 to NA
+su_merged1 <- su_merged1 %>% 
+mutate(curiousalc = if_else(su_y_itu__alc_001 %in% c(777,999), NA, su_y_itu__alc_001)) %>% 
+mutate(tryalc = if_else(su_y_itu__alc_002 %in% c(777,999), NA, su_y_itu__alc_002)) %>% 
+mutate(offeralc = if_else(su_y_itu__alc_003 %in% c(777,999), NA, su_y_itu__alc_003)) %>% 
+mutate(curiouscig = if_else(su_y_itu__nic_001 %in% c(777,999), NA, su_y_itu__nic_001)) %>% 
+mutate(trycig = if_else(su_y_itu__nic_002 %in% c(777,999), NA, su_y_itu__nic_002)) %>% 
+mutate(offercig = if_else(su_y_itu__nic_003 %in% c(777,999), NA, su_y_itu__nic_003)) %>% 
+mutate(curiousmj = if_else(su_y_itu__mj_001 %in% c(777,999), NA, su_y_itu__mj_001)) %>% 
+mutate(trymj = if_else(su_y_itu__mj_002 %in% c(777,999), NA, su_y_itu__mj_002)) %>% 
+mutate(offermj = if_else(su_y_itu__mj_003 %in% c(777,999), NA, su_y_itu__mj_003))
+
+```
+
+## Variable Creation
+
+**Definitions of Uptake Continuums**
+
+0 = never heard of substance Alcohol: su_y_sui\_\_hrd\_\_alc_001 (1=1)
+Tobacco: su_y_sui\_\_hrd\_\_nic_001 (1=1) Marijuana:
+su_y_sui\_\_hrd\_\_mj_001 (1=1)
+
+1 = Curious about substance use Alcohol: curiousalc (\<3=1) OR tryalc
+(\<3=1) Tobacco: curiouscig (\<3=1) OR trycig (\<3=1) Marijuana:
+curiousmj (\<3=1) OR trymj (\<3=1)
+
+2 = Susceptible substance user Alcohol: offeralc (\<3=1) Tobacco:
+offercig (\<3=1) Marijuana: offermj (\<3=1)
+
+3 = Initiated (sip or puff) Alcohol: sipalc (1=1) Tobacco: puffnic (1=1)
+Marijuana: puffmj (1=1)
+
+4 = Whole Portion (full drink, whole cigarette, whole joint) Alcohol:
+fulldrink (1=1) Tobacco: fullnic (1=1) Marijuana: fullmj (1=1)
+
+5 = regular use Alcohol: su_y_tlfb\_\_alc_ud (\>=26; drank once per week
+over 6 months) Tobacco: su_y_tlfb\_\_nic\_\_cig_ud (\>=26; smoked once
+per week over 6 months) Marijuana: su_y_tlfb\_\_mj\_\_smoke_ud (\>=26;
+smoked once per week over 6 months)
+
+6 = Experience Effects of Substance Alcohol:su_y_alcsre\_\_6mo_count
+(\>0=1) OR su_y_alcsre\_\_hvy_count (\>0=1) Tobacco:
+su_y_nicsre\_\_cig_sum (\>0=1) Marijuana: su_y_mjsre_sum (\>0=1)
+
+7 = Heavy Use Alcohol: su_y_tlfb\_\_alc\_\_binge_ud (\>0=1) OR
+su_y_tlfb\_\_alc_mean (\>=4 drinks per occasion) OR su_y_tlfb\_\_alc_ud
+((\>=52; drank twice per week over 6 months) Tobacco:
+su_y_tlfb\_\_nic\_\_cig_mean (\>=25 cigarettes per occasion) OR
+su_y_tlfb\_\_nic\_\_cig_ud (\>=52; smoked twice per week over 6 months)
+Marijuana: su_y_tlfb\_\_mj\_\_smoke_mean (\>=1 joint per occassion) OR
+su_y_tlfb\_\_mj\_\_smoke_ud (\>=52; smoked twice per week over 6 months)
+
+```{r sucreation, message=FALSE}
+
+#create separate alcohol use uptake variables 
+su_merged2 <- su_merged1 %>%
+mutate(AUC7 = ifelse((su_y_tlfb__alc__binge_ud > 0 | su_y_tlfb__alc_mean >=4 | su_y_tlfb__alc_ud >=52), 7, 0),
+AUC6 = ifelse((su_y_alcsre__6mo_count >0 | su_y_alcsre__hvy_count >0), 6, 0),
+AUC5 = ifelse((su_y_tlfb__alc_ud >=26), 5, 0),
+AUC4 = ifelse(fulldrink == 1, 4, 0),
+AUC3 = ifelse(sipalc == 1, 3, 0),
+AUC2 = ifelse(offeralc %in% c(1,2), 2, 0),
+AUC1 = ifelse((curiousalc %in% c(1,2) | tryalc %in% c(1,2)), 1, 0), 
+AUC0 = ifelse(su_y_sui__hrd__alc_001 == 1, 0.01, 0))
+
+#merge alcohol use uptake variables into one continuum taking the max
+   su_merged2 <- su_merged2 %>% 
+rowwise() %>% mutate(AUC = max(c(AUC0, AUC1, AUC2, AUC3, AUC4, AUC5, AUC6, AUC7), na.rm=T))
+   
+   table(su_merged2$AUC)
+
+   
+   #create separate cigarette use uptake variables 
+su_merged2 <- su_merged2 %>%
+mutate(TUC7 = ifelse((su_y_tlfb__nic__cig_mean >=25 | su_y_tlfb__nic__cig_ud >=52), 7, 0), #td : error -> avg
+TUC6 = ifelse(su_y_nicsre__cig_sum >0, 6, 0),
+TUC5 = ifelse((su_y_tlfb__nic__cig_ud >=26), 5, 0),
+TUC4 = ifelse(fullnic == 1, 4, 0),
+TUC3 = ifelse(puffnic == 1, 3, 0),
+TUC2 = ifelse(offercig %in% c(1,2), 2, 0),
+TUC1 = ifelse((curiouscig %in% c(1,2) | trycig %in% c(1,2)), 1, 0), 
+TUC0 = ifelse(su_y_sui__hrd__nic_001 == 1, 0.01, 0))
+
+#merge cigarette use uptake variables into one continuum taking the max
+   su_merged2 <- su_merged2 %>% 
+rowwise() %>% mutate(TUC= if_else(all(is.na(TUC0), is.na(TUC1), is.na(TUC2), is.na(TUC3), is.na(TUC4), is.na(TUC5), is.na(TUC6), is.na(TUC7)), NA, max(TUC0, TUC1, TUC2, TUC3, TUC4, TUC5, TUC6, TUC7, na.rm=T)))
+   
+   table(su_merged2$TUC)
+   
+   #create separate marijuana use uptake variables 
+su_merged2 <- su_merged2 %>%
+mutate(MUC7 = ifelse((su_y_tlfb__mj__smoke_mean >=1 | su_y_tlfb__mj__smoke_ud >=52), 7, 0),
+MUC6 = ifelse(su_y_mjsre_sum >0, 6, 0),
+MUC5 = ifelse((su_y_tlfb__mj__smoke_ud >=26), 5, 0),
+MUC4 = ifelse(fullmj == 1, 4, 0),
+MUC3 = ifelse(puffmj == 1, 3, 0),
+MUC2 = ifelse(offermj %in% c(1,2), 2, 0),
+MUC1 = ifelse((curiousmj %in% c(1,2) | trymj %in% c(1,2)), 1, 0), 
+MUC0 = ifelse(su_y_sui__hrd__mj_001 == 1, 0.01, 0))
+
+#merge marijuana use uptake variables into one continuum taking the max
+   su_merged2<- su_merged2 %>% 
+rowwise() %>% mutate(MUC= if_else(all(is.na(MUC0), is.na(MUC1), is.na(MUC2), is.na(MUC3), is.na(MUC4), is.na(MUC5), is.na(MUC6), is.na(MUC7)), NA, max(MUC0, MUC1, MUC2, MUC3, MUC4, MUC5, MUC6, MUC7, na.rm=T)))
+   
+   table(su_merged2$MUC)
+
+# Create overall substance use involvement indicator and initiation variables:
+
+su_merged2 <- su_merged2 %>%
+  # recode any 0.01 to 0
+  mutate(
+    AUC = ifelse(AUC == 0.01, 0, AUC),
+    TUC = ifelse(TUC == 0.01, 0, TUC),
+    MUC = ifelse(MUC == 0.01, 0, MUC)
+  ) %>%
+  # create *_init variables (1 if >=1, 0 if 0)
+  mutate(
+    AU_init = ifelse(AUC >= 3, 1, 0),
+    TU_init = ifelse(TUC >= 3, 1, 0),
+    MU_init = ifelse(MUC >= 3, 1, 0),
+    SU_init = ifelse(AU_init == 1 | TU_init == 1 | MU_init == 1, 1, 0)
+  ) %>%
+  # create overall substance use involvement
+  mutate(
+    SUC = rowSums(across(c(AUC, TUC, MUC)), na.rm = FALSE)
+  )
+
+#pairdown to just outcome variables (i.e., AUC, TUC, MUC)
+s.su1 <- c("participant_id", "session_id", "AUC", "TUC", "MUC", "SUC", "AU_init","TU_init","MU_init","SU_init","AUC0", "AUC1", "AUC2", "AUC3", "AUC4", "AUC5", "AUC6", "AUC7")
+su <- su_merged2[s.su1]
+   
+#Note: Final dataframe name is su
+
+```
+
+## Descriptive Statistics
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+#Make a wide dataset
+suwide = su %>%
+  pivot_wider(
+    id_cols = "participant_id", 
+    names_from = "session_id", 
+    values_from = c("AUC", "TUC", "MUC", "SUC", "AU_init","TU_init","MU_init","SU_init"))
+
+kbl(psych::describe(suwide ), caption = "Substance Use Continuum Summary Statistics") %>% 
+  kable_minimal(c("striped", "hover","condensed","responsive")) %>%
+  scroll_box(width = "100%")
+
+```
+
+## Viz: Distributions across all waves
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+plot_distribution(
+  data = su,
+  var = AUC,
+  title = "Alcohol Uptake Continuum",
+  xlab = "Alcohol Uptake Continuum",
+  annotate_x = 2.5
+)
+
+plot_distribution(
+  data = su,
+  var = TUC,
+  title = "Tobacco Uptake Continuum",
+  xlab = "Tobacco Uptake Continuum",
+  annotate_x = 2.5
+)
+
+plot_distribution(
+  data = su,
+  var = MUC,
+  title = "Marijuana Uptake Continuum",
+  xlab = "Marijuana Uptake Continuum",
+  annotate_x = 2
+)
+
+plot_distribution(
+  data = su,
+  var = SUC,
+  title = "Overall Substance Use Involvement",
+  xlab = "Substance Use Involvement",
+  annotate_x = 5
+)
+
+plot_distribution(
+  data = su,
+  var = AU_init,
+  title = "Alcohol Use Initiation",
+  xlab = "Alcohol Use Initiation",
+  annotate_x = 0.75
+)
+
+plot_distribution(
+  data = su,
+  var = TU_init,
+  title = "Tobacco Use Initiation",
+  xlab = "Tobacco Use Initiation",
+  annotate_x = 0.26
+)
+
+plot_distribution(
+  data = su,
+  var = MU_init,
+  title = "Marijuana Use Initiation",
+  xlab = "Marijuana Use Initiation",
+  annotate_x = 0.5
+)
+
+plot_distribution(
+  data = su,
+  var = SU_init,
+  title = "Any Substance Use Initiation",
+  xlab = "Any Substance Use Initiation",
+  annotate_x = 0.9
+)
+
+```
+
+## Viz: Distributions by wave
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+plot_distribution_by_time(
+  data = su,
+  var = AUC,
+  time_var = session_id,
+  title = "Alcohol Uptake Continuum by Wave",
+  xlab = "Alcohol Uptake Continuum",
+  annotate_x = 2
+)
+
+plot_distribution_by_time(
+  data = su,
+  var = TUC,
+  time_var = session_id,
+  title = "Tobacco Uptake Continuum by Wave",
+  xlab = "Tobacco Uptake Continuum",
+  annotate_x = 2
+)
+
+plot_distribution_by_time(
+  data = su,
+  var = MUC,
+  time_var = session_id,
+  title = "Marijuana Uptake Continuum by Wave",
+  xlab = "Marijuana Uptake Continuum",
+  annotate_x = 2
+)
+
+plot_distribution_by_time(
+  data = su,
+  var = SUC,
+  time_var = session_id,
+  title = "Overall Substance Use Involvement by Wave",
+  xlab = "Substance Use Involvement",
+  annotate_x = 2
+)
+
+plot_distribution_by_time(
+  data = su,
+  var = AU_init,
+  time_var = session_id,
+  title = "Alcohol Use Initiation by Wave",
+  xlab = "Alcohol Use Initiation",
+  annotate_x = 0.5
+)
+
+plot_distribution_by_time(
+  data = su,
+  var = TU_init,
+  time_var = session_id,
+  title = "Tobacco Use Initiation by Wave",
+  xlab = "Tobacco Use Initiation",
+  annotate_x = 0.5
+)
+
+plot_distribution_by_time(
+  data = su,
+  var = MU_init,
+  time_var = session_id,
+  title = "Marijuana Use Initiation by Wave",
+  xlab = "Marijuana Use Initiation",
+  annotate_x = 0.5
+)
+
+plot_distribution_by_time(
+  data = su,
+  var = SU_init,
+  time_var = session_id,
+  title = "Any Substance Use Initiation by Wave",
+  xlab = "Any Substance Use Initiation",
+  annotate_x = 0.5
+)
+```
+
+## Viz: Longitudinal Plots
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+
+su <- su %>% 
+  mutate(timepoint = str_extract(session_id, "\\d+") %>% as.integer())
+
+plot_longitudinal_subset(
+  data = su,
+  var = AUC,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 100,
+  seed = 2025,
+  title = "Alcohol Uptake Continuum over Time",
+  xlab = "Time",
+  ylab = "Alcohol Uptake Continuum"
+)
+
+plot_longitudinal_subset(
+  data = su,
+  var = TUC,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 100,
+  seed = 2025,
+  title = "Tobacco Uptake Continuum over Time",
+  xlab = "Time",
+  ylab = "Tobacco Uptake Continuum"
+)
+
+plot_longitudinal_subset(
+  data = su,
+  var = MUC,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 100,
+  seed = 2025,
+  title = "Marijuana Uptake Continuum over Time",
+  xlab = "Time",
+  ylab = "Marijuana Uptake Continuum"
+)
+
+plot_longitudinal_subset(
+  data = su,
+  var = SUC,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 100,
+  seed = 2025,
+  title = "Overall Substance Use Involvement over Time",
+  xlab = "Time",
+  ylab = "Substance Use Involvement"
+)
+
+plot_longitudinal_subset(
+  data = su,
+  var = AU_init,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 100,
+  seed = 2025,
+  title = "Alcohol Use Initiation over Time",
+  xlab = "Time",
+  ylab = "Alcohol Use Initiation"
+)
+
+plot_longitudinal_subset(
+  data = su,
+  var = TU_init,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 100,
+  seed = 2025,
+  title = "Tobacco Use Initiation over Time",
+  xlab = "Time",
+  ylab = "Tobacco Use Initiation"
+)
+
+plot_longitudinal_subset(
+  data = su,
+  var = MU_init,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 100,
+  seed = 2025,
+  title = "Marijuana Use Initiation over Time",
+  xlab = "Time",
+  ylab = "Marijuana Use Initiation"
+)
+
+plot_longitudinal_subset(
+  data = su,
+  var = SU_init,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 100,
+  seed = 2025,
+  title = "Any Substance Use Initiation over Time",
+  xlab = "Time",
+  ylab = "Any Substance Use Initiation"
+)
+```
+
+# Parent and Peer Variables
+
+## Family Enviornment
+
+### Datasets & Variables
+
+**fc_y_fes**: Child-percived family cohesion and family conflict
+
+\*fc_y_fes\_\_cohes_mean\*: Family Environment Scale [Youth] (Cohesion):
+Mean [Validation: No more than 1 missing or declined]
+
+\*fc_y_fes\_\_cohes_nm\*: Family Environment Scale [Youth] (Cohesion):
+Number missing
+
+\*fc_y_fes\_\_confl_mean\*: Family Environment Scale [Youth] (Conflict):
+Mean [Validation: No more than 1 missing or declined]
+
+\*fc_y_fes\_\_confl_nm\*: Family Environment Scale [Youth] (Conflict):
+Number missing
+
+## Peer Behavior Profile
+
+### Datasets & Variables
+
+**fc_y_pbp**: The Peer Behavior Profile [Youth] assesses youths’
+perceptions of their friends’ behaviors and characteristics. Items were
+measured on an ordinal response scale: 1 = None or almost none, 2 = A
+few, 3 = Half, 4 = Most, 5 = All or almost all, and 999 = Don't know.
+This section uses six peer behavior items. Three items reflect friends’
+problem or risk behaviors, including skipping school, being suspended
+from school, and shoplifting. Three items reflect positive or prosocial
+peer characteristics, including being athletes, attending spiritual or
+religious services, and being excellent students. These items can be
+used to create negative peer and positive peer summary variables.
+
+*fc_y_pbp_001*: How many of your friends have skipped school?
+
+*fc_y_pbp_002*: How many of your friends have been suspended from
+school?
+
+*fc_y_pbp_003*: How many of your friends have shoplifted occasionally?
+
+*fc_y_pbp_004*: How many of your friends are athletes?
+
+*fc_y_pbp_005*: How many of your friends attend spiritual or religious
+services once a month or more often?
+
+*fc_y_pbp_006*: How many of your friends are excellent students (GPA 3.5
+[B+] or higher)?
+
+## Resistance to Peer Influence
+
+### Datasets & Variables
+
+**fc_y_rpi**: Child-reported Resistance to Peer Influence. The
+Resistance to Peer Influence [Youth] scale assesses youths’ ability to
+resist peer pressure and maintain autonomous decision-making in social
+situations. Items present paired descriptions of youth behavior, such as
+whether the youth tends to keep friends happy, fit in with the crowd,
+change their mind because of peers, or go along with what friends do.
+This section uses the mean summary score. Higher scores indicate greater
+resistance to peer influence.
+
+*fc_y_rpi_mean*: Resistance to Peer Influence [Youth]: Mean summary
+score
+
+## Parental Monitoring
+
+### Datasets & Variables
+
+**fc_y_pm**: Child-Perceived, General Monitoring / Knowledge
+
+*fc_y_pm_001* (formerly parent_monitor_q1_y): "How often do your
+parents/guardians know where you are". 1 = Never, 2 = Almost Never, 3 =
+Sometimes, 4 = Often, 5 = Always or Almost Always, 777 = Decline to
+answer *fc_y_pm_002* (formerly parent_monitor_q2_y): "How often do your
+parents know who you are with when you are not at school and away from
+home". 1 = Never, 2 = Almost Never, 3 = Sometimes, 4 = Often, 5 = Always
+or Almost Always, 777 = Decline to answer *fc_y_pm_003* (formerly
+parent_monitor_q3_y): "If you are at home when parents/guardians not,
+how often do you know how to get in touch with them". 1 = Never, 2 =
+Almost Never, 3 = Sometimes, 4 = Often, 5 = Always or Almost Always, 777
+= Decline to answer *fc_y_pm_004* (formerly parent_monitor_q4_y): "How
+often do you talk to your parent or guardian about your plans for the
+coming day, such as your plans about what will happen at school or what
+you are going to do with friends" 1 = Never, 2 = Almost Never, 3 =
+Sometimes, 4 = Often, 5 = Always or Almost Always, 777 = Decline to
+answer *fc_y_pm_005* (formerly parent_monitor_q5_y): "In an average
+week, how many times do you and your parents/guardians eat dinner
+together". 1 = Never, 2 = Almost Never, 3 = Sometimes, 4 = Often, 5 =
+Always or Almost Always, 777 = Decline to answer
+
+*fc_y_pm_mean* is the summary score.
+
+## Parental Control
+
+Was indexed primarily by rules about substance use endorsed by parents.
+Items include rules about drinking, smoking, and marijuana use (reverse
+coded). A second set of items assessed whether parents enforced
+penalties for violating family rules about each substance. Higher scores
+will reflect more, enforced rules.
+
+### Datasets & Variables
+
+**su_p_rule**
+
+Alcohol
+
+\*su_p_rule\_\_alc_001\* (formerly parent_rules_q1): Which statement
+best describes the rules for your child's drinking in your house. 1 = My
+child is not allowed to drink under any circumstances; 2 = My child is
+allowed to drink at home but only on special occasions and under parent
+supervision; 3 = My child can have a drink when he/she asks for one; 4 =
+My child can drink at home whenever he/she wants to; 5 = I don't set
+rules about my child's drinking; 6 = I haven't made rules yet about my
+child drinking; 777 = Decline to answer
+
+\*su_p_rule\_\_alc_001\_\_03\* (formerly parent_rules_q3): Are these
+rules (regarding alcohol consumption) enforced? 0 = no; 1 = yes; 4 = I
+have not had to enforce these rules, 777 = Decline to answer
+
+Smoking
+
+\*su_p_rule\_\_nic\_\_cig_001\* (formerly parent_rules_q4): What are the
+family rules about smoking cigarettes ffor your child? 1 = Not allowed
+to smoke under any circumstances; 2 = Not allowed to smoke in home - no
+family rules outside home; 3 = Allowed to smoke in designated areas at
+home; 4 = Allowed to smoke anywhere; 5 = I don't set rules about smoking
+cigarettes; 6 = I haven't made rules yet about my child smoking
+cigarettes, 777 = Decline to answer
+
+\*su_p_rule\_\_nic\_\_cig_001\_\_02\* (formerly parent_rules_q6): Do you
+enforce penalties for violating family rules about smoking? 0 = Never; 1
+= Rarely; 2 = Sometimes; 3 = Often; 4 = I have not had to enforce these
+rules, 777 = decline to answer
+
+Marijuana
+
+\*su_p_rule\_\_mj_001\* (formerly parent_rules_q7): What are the family
+rules about using marijuana for your child? 1 = Not allowed to use
+marijuana under any circumstances; 2 = Not allowed to use marijuana in
+home - no family rules outside home; 3 = Allowed to use marijuana in
+home with permission; 4 = Allowed to use marijuana in home whenever
+he/she wants; 5 = I don't set rules about marijuana use; 6 = I haven't
+made rules yet about my child's marijuana use, 777 = decline to answer
+
+\*su_p_rule\_\_mj_001\_\_02\* (formerly parent_rules_q9) Do you enforce
+penalties for violating family rules about using marijuana? 1 = Never; 2
+= Rarely; 3 = Sometimes; 4 = Often; 5 = I have not had to enforce these
+rules, 777 = decline to answer
+
+## Data Cleaning and Variable Creation
+
+```{r parmon, message=FALSE}
+
+#Subset substance use rules dataset to variables of interest
+s.surule <- c("participant_id", "session_id", "su_p_rule__alc_001", "su_p_rule__alc_001__03", "su_p_rule__nic__cig_001", "su_p_rule__nic__cig_001__02", "su_p_rule__mj_001", "su_p_rule__mj_001__02")
+surule_subset <- surule[s.surule]
+
+#Subset parental monitoring dataset to variables of interest
+s.pm <- c("participant_id", "session_id", "fc_y_pm_mean")
+pm_subset <- pm[s.pm]
+
+#Subset family cohesion and conflict dataset to variables of interest
+s.fes <- c("participant_id", "session_id","fc_y_fes__cohes_mean","fc_y_fes__confl_mean")
+fes_subset <- fes[s.fes]
+
+#Subset peer behavior dataset to variables of interest
+s.pbp <- c("participant_id","session_id","fc_y_pbp_001","fc_y_pbp_002","fc_y_pbp_003","fc_y_pbp_004","fc_y_pbp_005","fc_y_pbp_006")
+pbp_subset <- pbp[s.pbp]
+pbp_subset <- pbp_subset %>%
+  mutate(across(c(fc_y_pbp_001,fc_y_pbp_002,fc_y_pbp_003,fc_y_pbp_004,fc_y_pbp_005,fc_y_pbp_006),~ ifelse(.x == 999, NA, as.numeric(.x)))
+  ) %>%
+  mutate(negative_peer_mean = rowMeans(across(c(fc_y_pbp_001, fc_y_pbp_002, fc_y_pbp_003)),na.rm = TRUE),positive_peer_mean = rowMeans(across(c(fc_y_pbp_004, fc_y_pbp_005, fc_y_pbp_006)),na.rm = TRUE),negative_peer_mean = ifelse(is.nan(negative_peer_mean), NA, negative_peer_mean),positive_peer_mean = ifelse(is.nan(positive_peer_mean), NA, positive_peer_mean))
+pbp_subset <- pbp_subset %>%
+  select(participant_id, session_id,negative_peer_mean,positive_peer_mean)
+
+#Subset resistance to peer influence dataset to variables of interest
+s.rpi <- c("participant_id", "session_id","fc_y_rpi_mean")
+rpi_subset <- rpi[s.rpi]
+
+#pm_subset and surule_subset are measured on the annual assessments. However, sdev_subset is a substudy offered at times that may or may not correspond to the annual assessment. 
+#Merge pm and surule together for data cleaning and variable creation and add cleaned sdev later. 
+parent_peer_datavars <- list(pm_subset, surule_subset, fes_subset, pbp_subset, rpi_subset)
+parmon <- Reduce(function(x, y) merge(x, y, by = c("participant_id", "session_id"), all = TRUE), parent_peer_datavars)
+
+#The parental monitoring and substance use rules variables are factors, not numeric, which will mess up zscores later. Recode as numeric
+parmon$su_p_rule__alc_001__03n <- as.numeric(as.character(parmon$su_p_rule__alc_001__03))
+parmon$su_p_rule__alc_001n <- as.numeric(as.character(parmon$su_p_rule__alc_001))
+parmon$su_p_rule__nic__cig_001__02n <- as.numeric(as.character(parmon$su_p_rule__nic__cig_001__02))
+parmon$su_p_rule__nic__cig_001n <- as.numeric(as.character(parmon$su_p_rule__nic__cig_001))
+parmon$su_p_rule__mj_001__02n <- as.numeric(as.character(parmon$su_p_rule__mj_001__02))
+parmon$su_p_rule__mj_001n <- as.numeric(as.character(parmon$su_p_rule__mj_001))
+
+#recode parent substance use rules so that 4 = I have not had to enforce these rules is 0 and so yes= 3 to match tobacco and marijuana.
+#alcohol
+parmon  <- parmon  %>% 
+  mutate(alcrulesenforce = case_when(
+    (su_p_rule__alc_001__03n == 0 | su_p_rule__alc_001__03n ==4) ~ 0, 
+    (su_p_rule__alc_001__03n == 1) ~ 3,
+    TRUE ~ NA)) 
+
+#reverse code substance use rules so that higher numbers indicate stricter rules.
+parmon  <- parmon  %>% 
+  mutate(alcrules = case_when(
+    (su_p_rule__alc_001n == 5 | su_p_rule__alc_001n == 6) ~ 0, 
+    (su_p_rule__alc_001n == 4) ~ 1,
+    (su_p_rule__alc_001n == 3) ~ 2,
+    (su_p_rule__alc_001n == 2) ~ 3,
+    (su_p_rule__alc_001n == 1) ~ 4,
+    TRUE ~ NA)) 
+
+#tobacco
+parmon  <- parmon  %>% 
+  mutate(tobrulesenforce = case_when(
+    (su_p_rule__nic__cig_001__02n == 0 | su_p_rule__nic__cig_001__02n == 4) ~ 0, 
+    (su_p_rule__nic__cig_001__02n == 1) ~ 1,
+    (su_p_rule__nic__cig_001__02n == 2) ~ 2,
+    (su_p_rule__nic__cig_001__02n == 3) ~ 3,
+    TRUE ~ NA)) 
+
+#reverse code substance use rules so that higher numbers indicate stricter rules.
+parmon  <- parmon  %>% 
+  mutate(tobrules = case_when(
+    (su_p_rule__nic__cig_001n == 6 | su_p_rule__nic__cig_001n ==5 ) ~ 0, 
+    (su_p_rule__nic__cig_001n == 4) ~ 1,
+    (su_p_rule__nic__cig_001n == 3) ~ 2,
+    (su_p_rule__nic__cig_001n == 2) ~ 3,
+    (su_p_rule__nic__cig_001n == 1) ~ 4,
+    TRUE ~ NA))
+
+#marijuana
+parmon  <- parmon  %>% 
+  mutate(mjrulesenforce = case_when(
+    (su_p_rule__mj_001__02n == 1 | su_p_rule__mj_001__02n ==5) ~ 0, 
+    (su_p_rule__mj_001__02n == 2) ~ 1,
+    (su_p_rule__mj_001__02n == 3) ~ 2,
+    (su_p_rule__mj_001__02n == 4) ~ 3,
+    TRUE ~ NA)) 
+
+#reverse code substance use rules so that higher numbers indicate stricter rules.
+parmon  <- parmon %>% 
+  mutate(mjrules = case_when(
+    (su_p_rule__mj_001 == 6 | su_p_rule__mj_001 ==5 ) ~ 0, 
+    (su_p_rule__mj_001 == 4) ~ 1,
+    (su_p_rule__mj_001 == 3) ~ 2,
+    (su_p_rule__mj_001 == 2) ~ 3,
+    (su_p_rule__mj_001 == 1) ~ 4,
+    TRUE ~ NA)) 
+
+#Standardize variables prior to subscale creation
+#create formula to generate z-scores
+calculate_z <- function(X, X_mean, S){
+  return((X-X_mean)/S)
+}
+
+parmon <- parmon %>% 
+  rename(ch_gen_know = fc_y_pm_mean)
+
+#Child Perceived General Monitoring / Knowledge
+parmon <- parmon %>% group_by(session_id) %>% 
+  mutate(zch_gen_know = calculate_z(ch_gen_know, 
+      mean(ch_gen_know, na.rm = TRUE),
+      sd(ch_gen_know, na.rm = TRUE)))
+
+##Parental Control Variables
+parmon <- parmon  %>% group_by(session_id) %>% 
+  mutate(zsurq1 = calculate_z(alcrules, 
+      mean(alcrules, na.rm = TRUE),
+      sd(alcrules, na.rm = TRUE)))
+
+parmon <- parmon  %>% group_by(session_id) %>% 
+  mutate(zsurq3 = calculate_z(alcrulesenforce, 
+      mean(alcrulesenforce, na.rm = TRUE),
+      sd(alcrulesenforce, na.rm = TRUE)))
+
+parmon  <- parmon  %>% group_by(session_id) %>% 
+  mutate(zsurq4 = calculate_z(tobrules, 
+      mean(tobrules, na.rm = TRUE),
+      sd(tobrules, na.rm = TRUE)))
+
+parmon  <- parmon  %>% group_by(session_id) %>% 
+  mutate(zsurq6 = calculate_z(tobrulesenforce, 
+      mean(tobrulesenforce, na.rm = TRUE),
+      sd(tobrulesenforce, na.rm = TRUE)))
+
+parmon <- parmon %>% group_by(session_id) %>% 
+  mutate(zsurq7 = calculate_z(mjrules, 
+      mean(mjrules, na.rm = TRUE),
+      sd(mjrules, na.rm = TRUE)))
+
+parmon  <- parmon  %>% group_by(session_id) %>% 
+  mutate(zsurq9 = calculate_z(mjrulesenforce, 
+      mean(mjrulesenforce, na.rm = TRUE),
+      sd(mjrulesenforce, na.rm = TRUE)))
+
+parmon <- parmon %>% rowwise() %>%
+    mutate(par_su_rules= mean(c(zsurq1, zsurq3, zsurq4, zsurq6, zsurq7, zsurq9), na.rm=TRUE))
+
+#pairdown to just outcome variables
+s.pm <- c("participant_id", "session_id", "ch_gen_know", "par_su_rules", "fc_y_fes__cohes_mean", "fc_y_fes__confl_mean", "negative_peer_mean", "positive_peer_mean", "fc_y_rpi_mean")
+
+parmon <- parmon[s.pm]
+
+#Note: Final data frame name parmon
+
+```
+
+## Viz: Distributions across all waves
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+plot_distribution(
+  data = parmon,
+  var = ch_gen_know,
+  title = "Child-Perceived Parental Monitoring",
+  xlab = "Parental Monitoring",
+  annotate_x = 3
+)
+
+plot_distribution(
+  data = parmon,
+  var = par_su_rules,
+  title = "Parent Substance Use Rules",
+  xlab = "Parent Substance Use Rules",
+  annotate_x = 1
+)
+
+plot_distribution(
+  data = parmon,
+  var = fc_y_fes__cohes_mean,
+  title = "Child-Perceived Family Cohesion",
+  xlab = "Family Cohesion",
+  annotate_x = 1.5
+)
+
+plot_distribution(
+  data = parmon,
+  var = fc_y_fes__confl_mean,
+  title = "Child-Perceived Family Conflict",
+  xlab = "Family Conflict",
+  annotate_x = .5
+)
+
+plot_distribution(
+  data = parmon,
+  var = negative_peer_mean,
+  title = "Negative Peer Characteristics",
+  xlab = "Negative Peer Characteristics",
+  annotate_x = 2.2
+)
+
+plot_distribution(
+  data = parmon,
+  var = positive_peer_mean,
+  title = "Positive Peer Characteristics",
+  xlab = "Positive Peer Characteristics",
+  annotate_x = 1
+)
+
+plot_distribution(
+  data = parmon,
+  var = fc_y_rpi_mean,
+  title = "Resistance to Peer Influence",
+  xlab = "Resistance to Peer Influence",
+  annotate_x = 2
+)
+
+
+```
+
+## Viz: Distributions by wave
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+plot_distribution_by_time(
+  data = parmon,
+  var = ch_gen_know,
+  time_var = session_id,
+  title = "Child-Perceived Parental Monitoring by Wave",
+  xlab = "Parental Monitoring",
+  annotate_x = 3
+)
+
+plot_distribution_by_time(
+  data = parmon,
+  var = par_su_rules,
+  time_var = session_id,
+  title = "Parent Substance Use Rules by Wave",
+  xlab = "Parent Substance Use Rules",
+  annotate_x = 1
+)
+
+plot_distribution_by_time(
+  data = parmon,
+  var = fc_y_fes__cohes_mean,
+  time_var = session_id,
+  title = "Child-Perceived Family Cohesion by Wave",
+  xlab = "Family Cohesion",
+  annotate_x = 1.5
+)
+
+plot_distribution_by_time(
+  data = parmon,
+  var = fc_y_fes__confl_mean,
+  time_var = session_id,
+  title = "Child-Perceived Family Conflict by Wave",
+  xlab = "Family Conflict",
+  annotate_x = .5
+)
+
+plot_distribution_by_time(
+  data = parmon,
+  var = negative_peer_mean,
+  time_var = session_id,
+  title = "Negative Peer Characteristics by Wave",
+  xlab = "Negative Peer Characteristics",
+  annotate_x = 2.2
+)
+
+plot_distribution_by_time(
+  data = parmon,
+  var = positive_peer_mean,
+  time_var = session_id,
+  title = "Positive Peer Characteristics by Wave",
+  xlab = "Positive Peer Characteristics",
+  annotate_x = 1
+)
+
+plot_distribution_by_time(
+  data = parmon,
+  var = fc_y_rpi_mean,
+  time_var = session_id,
+  title = "Resistance to Peer Influence by Wave",
+  xlab = "Resistance to Peer Influence",
+  annotate_x = 2
+)
+```
+
+## Viz: Longitudinal Plots
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+parmon <- parmon %>% 
+  mutate(timepoint = str_extract(session_id, "\\d+") %>% as.integer())
+
+plot_longitudinal_subset(
+  data = parmon,
+  var = ch_gen_know,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 50,
+  seed = 2025,
+  title = "Child-Perceived Parental Monitoring over Time",
+  xlab = "Time",
+  ylab = "Parental Monitoring"
+)
+
+plot_longitudinal_subset(
+  data = parmon,
+  var = par_su_rules,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 50,
+  seed = 2025,
+  title = "Parent Substance Use Rules over Time",
+  xlab = "Time",
+  ylab = "Parent Substance Use Rules"
+)
+
+plot_longitudinal_subset(
+  data = parmon,
+  var = fc_y_fes__cohes_mean,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 50,
+  seed = 2025,
+  title = "Child-Perceived Family Cohesion over Time",
+  xlab = "Time",
+  ylab = "Family Cohesion"
+)
+
+plot_longitudinal_subset(
+  data = parmon,
+  var = fc_y_fes__confl_mean,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 50,
+  seed = 2025,
+  title = "Child-Perceived Family Conflict over Time",
+  xlab = "Time",
+  ylab = "Family Conflict"
+)
+
+plot_longitudinal_subset(
+  data = parmon,
+  var = negative_peer_mean,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 50,
+  seed = 2025,
+  title = "Negative Peer Characteristics over Time",
+  xlab = "Time",
+  ylab = "Negative Peer Characteristics"
+)
+
+plot_longitudinal_subset(
+  data = parmon,
+  var = positive_peer_mean,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 50,
+  seed = 2025,
+  title = "Positive Peer Characteristics over Time",
+  xlab = "Time",
+  ylab = "Positive Peer Characteristics"
+)
+
+plot_longitudinal_subset(
+  data = parmon,
+  var = fc_y_rpi_mean,
+  time_var = timepoint,
+  id_var = participant_id,
+  sample_n = 50,
+  seed = 2025,
+  title = "Resistance to Peer Influence over Time",
+  xlab = "Time",
+  ylab = "Resistance to Peer Influence"
+)
+```
+
+
+# Linked External Data
+
+## Dataset(s) & Variables
+
+**le_l_adi**: Area Deprivation Index; a neighborhood-level composite
+measure of socioeconomic disadvantage. Higher values indicate greater
+neighborhood deprivation. variables were measured at baseline (00A).
+
+*le_l_adi\_\_addr1\_\_income_med*: Median family income [Area
+Deprivation Index] (Address 1)
+
+*le_l_adi\_\_addr1\_\_mortgage_med*: Median monthly mortgage [Area
+Deprivation Index] (Address 1)
+
+**le_l_svi**: Social Vulnerability Index; a neighborhood-level composite
+measure of community vulnerability based on social, economic,
+demographic, and housing-related factors. Higher values indicate greater
+social vulnerability. variables were measured at baseline (00A)
+
+*le_l_svi\_\_addr1\_\_17younger_prcnt*: Percent population estimate of persons 17 and younger subcomponent [CDC SVI (ACS 2014-2018 5 yr avg); census tract] (Address 1)
+
+**le_l_densalc**: Alcohol outlet density based on Census 2016 measures;
+captures the density of alcohol outlets in the participant's residential
+area. Higher values indicate greater alcohol outlet density. variables were measured at baseline (00A)
+
+*le_l_densalc\_\_addr1\_\_alc_density\_\_2016*: Estimate of alcohol
+outlet density (Number of Establishments where alcohol could be
+purchased and/or consumed based on North American Industry
+Classification System (NAICS) from ZIP Code Business Patterns from Census 2016) (Address 1)
+
+## Data Cleaning & Variable Creation
+
+```{r ed, , message=FALSE}
+
+#Subset brief adi/svi/densalc to variables of interest
+s.adi <- c("participant_id", "session_id","le_l_adi__addr1__income_med", "le_l_adi__addr1__mortgage_med")
+adi_subset <- adi[s.adi]
+
+s.svi <- c("participant_id", "session_id","le_l_svi__addr1__17younger_prcnt")
+svi_subset <- svi[s.svi]
+
+s.densalc <- c( "participant_id", "session_id","le_l_densalc__addr1__alc_density__2016")
+densalc_subset <- densalc[s.densalc]
+
+le <- adi_subset %>%
+  full_join(svi_subset, by = c("participant_id", "session_id")) %>%
+  full_join(densalc_subset, by = c("participant_id", "session_id"))
+
+# Final data frame name le
+```
+
+## Viz: Distributions of linked external data at baseline
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+plot_distribution(
+  data = le,
+  var = le_l_adi__addr1__income_med,
+  title = "Median Family Income",
+  xlab = "Median Family Income",
+  annotate_x = 100200
+)
+
+plot_distribution(
+  data = le,
+  var = le_l_adi__addr1__mortgage_med,
+  title = "Median Monthly Mortgage",
+  xlab = "Median Monthly Mortgage",
+  annotate_x = 2000
+)
+
+plot_distribution(
+  data = le,
+  var = le_l_svi__addr1__17younger_prcnt,
+  title = "Percent Population Aged 17 or Younger",
+  xlab = "Percent Population Aged 17 or Younger",
+  annotate_x = 30
+)
+
+plot_distribution(
+  data = le,
+  var = le_l_densalc__addr1__alc_density__2016,
+  title = "Alcohol Outlet Density Estimate, 2016",
+  xlab = "Alcohol Outlet Density Estimate",
+  annotate_x = 150
+)
+```
+
+# Twin/Sibling/Family Data
+
+We used the twin/sibling subset of the Adolescent Brain and Cognitive
+Development Study.
+
+Sibling/Twin Identifiers:
+
+## Dataset(s) & Variables Used
+
+**gn_e_zygrat**
+
+*gn_e_zygrat_famno* (formerly zyg_ss_fam_no in gen_y_zygrat): Family
+Number. *gn_e_zygrat_judgement* (formerly zyg_ss_r1_judgement in
+gen_y_zygrat): Rating. (1 = DZ; 2 = MZ)
+
+**gn_y_genrel**
+
+\*gn_y_genrel_zyg\_\_01 through gn_y_genrel_zyg\_\_04\* (formerly
+genetic_zygosity_status\_(1,2,3,or 4)): Genetically inferred zygosity
+status between participant and gn_y_genrel_id\_\_paired\_\_01 through
+gn_y_genrel_id\_\_paired\_\_04. 1 = Monozygotic, 2 = Dizygotic, 3 =
+sibling, 444 = not available \*gn_y_genrel_id\_\_paired\_\_01 through
+gn_y_genrel_id\_\_paired\_\_04\* (formerly
+genetic_paired_subjectid\_(1,2,3, or 4)): ID of the participant who is
+genetic related based on gn_y_genrel_pihat\_\_01 through
+gn_y_genrel_pihat\_\_04
+
+## Data Cleaning & Variable Creation
+
+```{r gendata, message=FALSE}
+
+
+#Subset zygrat dataset to variables of interest
+s.zygrat <- c("participant_id", "session_id", "gn_e_zygrat_famno", "gn_e_zygrat_judgement")
+zygrat_subset <- zygrat[s.zygrat]
+
+#Subset genrel dataset to variables of interest
+s.genrel <- c("participant_id", "gn_y_genrel_zyg__01", "gn_y_genrel_zyg__02", "gn_y_genrel_zyg__03", "gn_y_genrel_zyg__04", "gn_y_genrel_id__paired__01", "gn_y_genrel_id__paired__02", "gn_y_genrel_id__paired__03", "gn_y_genrel_id__paired__04")
+genrel_subset <- genrel[s.genrel]
+
+
+#merge genetic specific dataframes with demo dataframe 
+#Note: genrel_subset doesn't have a session_id var. Merge demo_mf with zygrat_subset, then merge combined dataframe with genrel
+rel1 <- merge(demo_mf, zygrat_subset, by=c("participant_id", "session_id"), all = TRUE)
+rel2 <- merge(rel1 , genrel_subset, by=c("participant_id"), all = TRUE)
+
+#sort the data so it is in time order and families are together
+sort.rel <- rel2[order(rel2$ab_g_stc__design_id__fam, rel2$participant_id, rel2$session_id), ]
+
+#gn_y_genrel_zyg vars have 444 when genetic_pi_hat not calculated. Change 444 to NA
+sort.rel2 <- sort.rel %>% 
+mutate(genrel_zyg01 = if_else(gn_y_genrel_zyg__01 %in% c(444), NA, gn_y_genrel_zyg__01)) %>%
+mutate(genrel_zyg02 = if_else(gn_y_genrel_zyg__02 %in% c(444), NA, gn_y_genrel_zyg__02)) %>%
+mutate(genrel_zyg03 = if_else(gn_y_genrel_zyg__03 %in% c(444), NA, gn_y_genrel_zyg__03)) %>%
+mutate(genrel_zyg04 = if_else(gn_y_genrel_zyg__04 %in% c(444), NA, gn_y_genrel_zyg__04))
+
+class(sort.rel2$genrel_zyg01)
+#Note: Although the gn_y_genrel_zyg variables contain numeric values, it is a factor. Change to numeric for future variable manipulation
+
+sort.rel2$genrel_zyg01n <- as.numeric(as.character(sort.rel2$genrel_zyg01))
+sort.rel2$genrel_zyg02n <- as.numeric(as.character(sort.rel2$genrel_zyg02))
+sort.rel2$genrel_zyg03n <- as.numeric(as.character(sort.rel2$genrel_zyg03))
+sort.rel2$genrel_zyg04n <- as.numeric(as.character(sort.rel2$genrel_zyg04))
+
+class(sort.rel2$genrel_zyg01n)
+
+#Combine genetic zygosity variables into a single variable in which the lowest zygosity (i.e., 1=MZ, 2=DZ, 3=siblings) is retained. For example, individuals with famid 1430 has a set of twins and their sibling. This code will maintain the twin zygosity status instead of the 3 they share with their genetically related sibling.  
+sort.rel2 <- sort.rel2 %>%
+  mutate(zygcombined = pmin(genrel_zyg01n, genrel_zyg02n, genrel_zyg03n, genrel_zyg04n, na.rm = TRUE))
+
+#For those who do not have genetic zygosity, will use interviewer determined zygosity. 
+#first, we need to ensure that zygosity judgement matches for the twin pairs because sometimes they get different results. For example, twins with famid 11878, one twin received a judgement of 1 (DZ) while the other received a judgement of 2 (MZ). For twins without genetic zygosity whose judgement don't match, we will set them as siblings. 
+
+sort.rel2 <- sort.rel2 %>% 
+group_by(ab_g_stc__design_id__fam, session_id) %>% 
+mutate(consistent_zyg = length(unique(gn_e_zygrat_judgement)) == 1)
+
+table(sort.rel2$consistent_zyg)
+#shows there is some inconsistency in matching (i.e., 399 instances of FALSE)
+
+#make numeric variable where 1=mismatched and 0=matched
+sort.rel2 <- sort.rel2 %>% 
+  mutate(zygmismatch = case_when(
+    (consistent_zyg == "TRUE") ~ 0, 
+    (consistent_zyg == "FALSE") ~ 1,
+    TRUE ~ NA))
+
+table(sort.rel2$zygmismatch)
+#Note: 399 have a 1 which matches the factor variable
+
+#Make a new dataset to make sure that those marked as mismatched are actually mismatched 
+check <- sort.rel2 %>% group_by(ab_g_stc__design_id__fam, session_id) %>%
+filter(zygmismatch==1)
+
+#check on those families who have more than 2 people in them
+check_morethan2 <- sort.rel2 %>% 
+  group_by(ab_g_stc__design_id__fam, session_id) %>% 
+  mutate(count = n_distinct(participant_id)) %>% 
+  filter(zygmismatch == 1 & count > 2)
+
+#recode judgement zygosity coding so it matches genetic zygosity wherein 1=MZ, 2=DZ
+sort.rel2 <- sort.rel2 %>% 
+  mutate(judgezygr = case_when(
+    (gn_e_zygrat_judgement == 1) ~ 2, 
+    (gn_e_zygrat_judgement == 2) ~ 1,
+    TRUE ~ NA))
+
+sort.rel3 <- sort.rel2 %>% ungroup() %>%
+mutate (zyg = if_else(!is.na(zygcombined), zygcombined, ## If zygcombined isn't missing, take zygcombined
+      if_else(zygmismatch == 1, ## if zygcombined is missing, check mismatch 
+         3, ## If they are mismatched, mark as sibling (3)
+         judgezygr)))  ## Otherwise, put judgezygr 
+
+#remove the same demo variables
+rel <- sort.rel3 %>%
+  select(
+    -ab_g_dyn__visit_dtt,
+    -ab_g_dyn__visit_age,
+    -ab_p_demo__relation_001,
+    -ab_p_demo__marital__slf_001,
+    -multigen,
+    -ab_p_demo__child__time_001,
+    -ab_p_demo__child__time_001__01,
+    -ab_p_demo__child__time_001__02,
+    -ab_g_stc__cohort_ethnrace__leg,
+    -ab_g_stc__cohort_race__nih,
+    -ab_g_stc__cohort_sex,
+    -ab_g_stc__design_id__fam,
+    -ab_g_stc__design_id__birth,
+    -ab_g_stc__design_famrel,
+    -housepop
+  )
+
+#Note: Final data frame name rel
+
+```
+
+# Combing all finalized datasets
+
+```{r, message=FALSE}
+
+# List of datasets to merge 
+all_final_datasets <- list(demo_mf, rel, mh, su, parmon, le)
+
+# Merge all data.tables using full outer join based on id
+all_final_merged <- Reduce(function(x, y) merge(x, y, by = c("participant_id", "session_id"), all = TRUE), all_final_datasets)
+
+sort.all_final_merged <- all_final_merged[order(all_final_merged$participant_id, all_final_merged$session_id), ]
+
+sort.all_final_merged <- sort.all_final_merged %>%
+  select(-timepoint, -timepoint.y, -timepoint.x, -ab_g_dyn__design_site.y) %>%
+  rename(ab_g_dyn__design_site=ab_g_dyn__design_site.x)
+
+sort.all_final_merged <- sort.all_final_merged %>%
+  mutate(timepoint = str_extract(session_id, "\\d+") %>% as.integer())
+
+#Save out final merged dataset
+write.csv(sort.all_final_merged, "C:\\Users\\kmarcea\\Box\\MCAP Steering Committee\\Summer Institute\\- Summer Institute - Shared Folder\\Datasets\\MCAPSI_ABCDv7_2026_07_01.csv", row.names = FALSE)
+
+#write.csv(sort.all_final_merged,"C:/Users/admin/Box/- Summer Institute - Shared Folder/Datasets/MCAPSI_ABCDv7_2026_06_02.csv",row.names = FALSE)
+
+sort.all_final_merged %>%
+  summarise(
+    n_families = n_distinct(ab_g_stc__design_id__fam),
+    n_people = n_distinct(participant_id),
+    max_rows_per_person = max(table(participant_id))
+  )
+
+# Select one participant per family
+set.seed(123)
+
+one_person_per_family <- sort.all_final_merged %>%
+  filter(
+    !is.na(ab_g_stc__design_id__fam),
+    !is.na(participant_id)
+  ) %>%
+  distinct(ab_g_stc__design_id__fam, participant_id) %>%
+  group_by(ab_g_stc__design_id__fam) %>%
+  slice_sample(n = 1) %>%
+  ungroup()
+
+ABCD_onedata <- sort.all_final_merged %>%
+  semi_join(
+    one_person_per_family,
+    by = c("ab_g_stc__design_id__fam", "participant_id")
+  )
+
+ABCD_onedata %>%
+  summarise(
+    n_families = n_distinct(ab_g_stc__design_id__fam),
+    n_people = n_distinct(participant_id),
+    max_rows_per_person = max(table(participant_id))
+  )
+
+write.csv(ABCD_onedata, "C:\\Users\\kmarcea\\Box\\MCAP Steering Committee\\Summer Institute\\- Summer Institute - Shared Folder\\Datasets\\MCAPSI_ABCDv7_2026_06_08_oneperfam.csv", row.names = FALSE)
+
+#write.csv(ABCD_onedata, "C:/Users/admin/Box/- Summer Institute - Shared Folder/Datasets/MCAPSI_ABCDv7_2026_07_07_oneperfam.csv", row.names = FALSE)
+
+```
+
+# Alphabetical Variable Dictionary
+
+## A
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+## data.frame to contain info; putting it in a data.frame allows the table to be prettified with kableExtra
+A <- tribble(
+  ~ indicator, ~ description,
+"`ab_g_dyn__visit_dtt`", "Date and time at the start of the visit.",
+  "`ab_g_dyn__visit_age`", "Youth age at the start of the visit.",
+  "`ab_p_demo__relation_001`", "Relationship of the reporting caregiver to the participant.",
+  "`ab_p_demo__marital__slf_001`", "Marital status of the reporting caregiver.",
+"`ab_p_demo__child__time_001`", "Whether the child spends significant time in another household.",
+  "`ab_p_demo__child__time_001__01`", "Amount of time per week the child spends in another household.",
+  "`ab_p_demo__child__time_001__02`", "Best person to contact about the other household.",
+  "`ab_g_stc__cohort_ethnrace__leg`", "Parent-reported child race/ethnicity. 1 = Hispanic; 2 = White; 3 = Black; 4 = Asian; 13 = Other.",
+  "`ab_g_stc__cohort_race__nih`", "Child race based on NIH classification.",
+  "`ab_g_stc__cohort_sex`", "Parent-reported sex assigned at birth. 1 = Male; 2 = Female.",
+  "`ab_g_stc__design_id__fam`", "Family ID. Participants from the same family share a family ID.",
+  "`ab_g_stc__design_id__birth`", "Birth event ID. Participants born together share a birth event ID.",
+  "`ab_g_stc__design_famrel`", "Family relationship structure indicator.",
+ "`AUC`", "Alcohol uptake continuum. Higher scores indicate greater alcohol use involvement.",
+"`AU_init`", "Alcohol use initiation indicator. 0 = no initiation; 1 = alcohol uptake score greater than or equal to 1."
+)
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+kable(
+  A,
+  format = "html",
+  col.names = c("Variable Name", "Variable Description")
+) %>%
+  kable_styling(bootstrap_options = c("hover"))
+```
+
+## C
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+## data.frame to contain info; putting it in a data.frame allows the table to be prettified with kableExtra
+C <- tribble(
+  ~ indicator, ~ description,
+  "`ch_gen_know`", "Child-perceived parental monitoring/general knowledge, based on the youth-reported parental monitoring mean score.",
+  "`consistent_zyg`", "Indicator for whether interviewer-rated zygosity was consistent within family and session."
+)
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+kable(
+  C,
+  format = "html",
+  col.names = c("Variable Name", "Variable Description")
+) %>%
+  kable_styling(bootstrap_options = c("hover"))
+```
+
+## F
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+## data.frame to contain info; putting it in a data.frame allows the table to be prettified with kableExtra
+f <- tribble(
+  ~ indicator, ~ description,
+  "`fc_y_fes__cohes_mean`", "Youth-reported Family Environment Scale cohesion mean score.",
+  "`fc_y_fes__confl_mean`", "Youth-reported Family Environment Scale conflict mean score.",
+  "`fc_y_rpi_mean`", "Youth-reported Resistance to Peer Influence mean score. Higher scores indicate greater resistance to peer influence."
+)
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+kable(
+  f,
+  format = "html",
+  col.names = c("Variable Name", "Variable Description")
+) %>%
+  kable_styling(bootstrap_options = c("hover"))
+```
+
+## G
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+## data.frame to contain info; putting it in a data.frame allows the table to be prettified with kableExtra
+g <- tribble(
+  ~ indicator, ~ description,
+  "`gn_e_zygrat_famno`", "Family number from the zygosity rating dataset.",
+  "`gn_e_zygrat_judgement`", "Interviewer-rated twin zygosity. Original coding: 1 = DZ; 2 = MZ.",
+  "`gn_y_genrel_zyg__01`", "Genetically inferred zygosity status for paired participant 1. 1 = MZ; 2 = DZ; 3 = sibling; 444 = not available.",
+  "`gn_y_genrel_zyg__02`", "Genetically inferred zygosity status for paired participant 2. 1 = MZ; 2 = DZ; 3 = sibling; 444 = not available.",
+  "`gn_y_genrel_zyg__03`", "Genetically inferred zygosity status for paired participant 3. 1 = MZ; 2 = DZ; 3 = sibling; 444 = not available.",
+  "`gn_y_genrel_zyg__04`", "Genetically inferred zygosity status for paired participant 4. 1 = MZ; 2 = DZ; 3 = sibling; 444 = not available.",
+  "`gn_y_genrel_id__paired__01`", "Participant ID of genetically related paired participant 1.",
+  "`gn_y_genrel_id__paired__02`", "Participant ID of genetically related paired participant 2.",
+  "`gn_y_genrel_id__paired__03`", "Participant ID of genetically related paired participant 3.",
+  "`gn_y_genrel_id__paired__04`", "Participant ID of genetically related paired participant 4.",
+)
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+kable(
+  g,
+  format = "html",
+  col.names = c("Variable Name", "Variable Description")
+) %>%
+  kable_styling(bootstrap_options = c("hover"))
+```
+
+## H
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+## data.frame to contain info; putting it in a data.frame allows the table to be prettified with kableExtra
+h <- tribble(
+  ~ indicator, ~ description,
+    "`housepop`", "Number of people living at the youth's address."
+)
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+kable(
+  h,
+  format = "html",
+  col.names = c("Variable Name", "Variable Description")
+) %>%
+  kable_styling(bootstrap_options = c("hover"))
+```
+
+## J
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+## data.frame to contain info; putting it in a data.frame allows the table to be prettified with kableExtra
+j <- tribble(
+  ~ indicator, ~ description,
+    "`judgezygr`", "Recoded interviewer-rated zygosity to match genetic zygosity coding. 1 = MZ; 2 = DZ."
+)
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+kable(
+  j,
+  format = "html",
+  col.names = c("Variable Name", "Variable Description")
+) %>%
+  kable_styling(bootstrap_options = c("hover"))
+```
+
+
+## L
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+## data.frame to contain info; putting it in a data.frame allows the table to be prettified with kableExtra
+l <- tribble(
+  ~ indicator, ~ description,
+    "`le_l_adi__addr1__income_med`", 
+  "Median family income used as a subcomponent of the Area Deprivation Index, based on Address 1. Measured at baseline (00A).",
+  
+  "`le_l_adi__addr1__mortgage_med`", 
+  "Median monthly mortgage used as a subcomponent of the Area Deprivation Index, based on Address 1. Measured at baseline (00A).",
+  
+  "`le_l_svi__addr1__17younger_prcnt`", 
+  "Percent population estimate of persons aged 17 years or younger, used as a subcomponent of the CDC Social Vulnerability Index, based on census tract information from Address 1. Measured at baseline (00A).",
+  
+  "`le_l_densalc__addr1__alc_density__2016`", 
+  "Estimated alcohol outlet density, defined as the number of establishments where alcohol could be purchased and/or consumed, based on NAICS classifications from ZIP Code Business Patterns from Census 2016. Measured at baseline (00A)."
+)
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+kable(
+  l,
+  format = "html",
+  col.names = c("Variable Name", "Variable Description")
+) %>%
+  kable_styling(bootstrap_options = c("hover"))
+```
+
+## M
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+## data.frame to contain info; putting it in a data.frame allows the table to be prettified with kableExtra
+m <- tribble(
+  ~ indicator, ~ description,
+ "`mh_p_cbcl__synd__ext_sum`", "Parent-reported CBCL externalizing syndrome scale sum.",
+  "`mh_p_cbcl__synd__int_sum`", "Parent-reported CBCL internalizing syndrome scale sum.",
+  "`mh_p_cbcl__synd__attn_sum`", "Parent-reported CBCL attention problems syndrome scale sum.",
+  "`mh_y_bpm__ext_sum`", "Youth-reported Brief Problem Monitor externalizing sum score.",
+  "`mh_y_bpm__int_sum`", "Youth-reported Brief Problem Monitor internalizing sum score.",
+  "`mh_y_pai_sum`", "Youth-reported NIH Toolbox Positive Affect Items sum score.",
+  "`multigen`", "Indicator for whether the youth lives in a multigenerational household.",
+  "`MUC`", "Marijuana uptake continuum. Higher scores indicate greater marijuana use involvement.",
+  "`MU_init`", "Marijuana use initiation indicator. 0 = no initiation; 1 = marijuana uptake score greater than or equal to 1."
+)
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+kable(
+  m,
+  format = "html",
+  col.names = c("Variable Name", "Variable Description")
+) %>%
+  kable_styling(bootstrap_options = c("hover"))
+```
+
+## N
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+## data.frame to contain info; putting it in a data.frame allows the table to be prettified with kableExtra
+n <- tribble(
+  ~ indicator, ~ description,
+ "`negative_peer_mean`", "Mean of negative peer behavior items, including friends skipping school, being suspended, and shoplifting."
+)
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+kable(
+  n,
+  format = "html",
+  col.names = c("Variable Name", "Variable Description")
+) %>%
+  kable_styling(bootstrap_options = c("hover"))
+```
+
+## P
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+## data.frame to contain info; putting it in a data.frame allows the table to be prettified with kableExtra
+p <- tribble(
+  ~ indicator, ~ description,
+ "`participant_id`", "Unique participant identifier.",
+  "`par_su_rules`", "Parent-reported substance use rules composite. Higher scores indicate stricter and more strongly enforced rules regarding alcohol, tobacco, and marijuana.",
+ "`positive_peer_mean`", "Mean of positive peer characteristic items, including friends being athletes, attending religious/spiritual services, and being excellent students."
+
+)
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+kable(
+  p,
+  format = "html",
+  col.names = c("Variable Name", "Variable Description")
+) %>%
+  kable_styling(bootstrap_options = c("hover"))
+```
+
+## S
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+## data.frame to contain info; putting it in a data.frame allows the table to be prettified with kableExtra
+s <- tribble(
+  ~ indicator, ~ description,
+ "`session_id`", "ABCD assessment session identifier.",
+ "`SUC`", "Overall substance use continuum/involvement score, calculated from alcohol, tobacco, and marijuana uptake continua.",
+  "`SU_init`", "Any substance use initiation indicator. 0 = no substance use initiation; 1 = initiation of alcohol, tobacco, or marijuana use."
+)
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+kable(
+  s,
+  format = "html",
+  col.names = c("Variable Name", "Variable Description")
+) %>%
+  kable_styling(bootstrap_options = c("hover"))
+```
+
+## T
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+## data.frame to contain info; putting it in a data.frame allows the table to be prettified with kableExtra
+t <- tribble(
+  ~ indicator, ~ description,
+ "`timepoint`", "Numeric timepoint extracted from session_id.",
+ "`TUC`", "Tobacco uptake continuum. Higher scores indicate greater tobacco/nicotine use involvement.",
+ "`TU_init`", "Tobacco use initiation indicator. 0 = no initiation; 1 = tobacco uptake score greater than or equal to 1."
+)
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+kable(
+  t,
+  format = "html",
+  col.names = c("Variable Name", "Variable Description")
+) %>%
+  kable_styling(bootstrap_options = c("hover"))
+```
+
+## Z
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+## data.frame to contain info; putting it in a data.frame allows the table to be prettified with kableExtra
+z <- tribble(
+  ~ indicator, ~ description,
+  "`zygcombined`", "Combined genetically inferred zygosity variable, retaining the closest genetic relationship across paired participants.",
+   "`zygmismatch`", "Indicator for mismatch in interviewer-rated zygosity within family and session. 0 = matched; 1 = mismatched.",
+    "`zyg`", "Final zygosity/family relatedness variable. 1 = MZ twin; 2 = DZ twin; 3 = sibling."
+)
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+kable(
+  z,
+  format = "html",
+  col.names = c("Variable Name", "Variable Description")
+) %>%
+  kable_styling(bootstrap_options = c("hover"))
+```
