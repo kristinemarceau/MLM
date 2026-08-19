@@ -174,10 +174,19 @@
 % Put these at the very end of flatly-pdf.tex
 % ============================================================
 
-% Force 12-point body text
-\AtBeginDocument{
-  \fontsize{12pt}{14.5pt}\selectfont
+% Force normal body text to 12 pt
+\makeatletter
+\renewcommand\normalsize{%
+  \@setfontsize\normalsize{12pt}{14.5pt}%
+  \abovedisplayskip 12pt plus 3pt minus 7pt%
+  \abovedisplayshortskip 0pt plus 3pt%
+  \belowdisplayshortskip 7pt plus 3pt minus 4pt%
+  \belowdisplayskip \abovedisplayskip
 }
+\makeatother
+
+% Start document using the redefined normal size
+\AtBeginDocument{\normalsize}
 
 % Force all hyperlink colors to Flatly teal
 \AtBeginDocument{
