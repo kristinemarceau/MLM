@@ -168,3 +168,33 @@
 \renewcommand{\cftsubsecfont}{\color{FlatlyDark}}
 \renewcommand{\cftsecpagefont}{\color{FlatlyGray}}
 \renewcommand{\cftsubsecpagefont}{\color{FlatlyGray}}
+
+% ============================================================
+% FINAL OVERRIDES
+% Put these at the very end of flatly-pdf.tex
+% ============================================================
+
+% Force 12-point body text
+\AtBeginDocument{
+  \fontsize{12pt}{14.5pt}\selectfont
+}
+
+% Force all hyperlink colors to Flatly teal
+\AtBeginDocument{
+  \hypersetup{
+    colorlinks=true,
+    linkcolor=FlatlyTeal,
+    urlcolor=FlatlyTeal,
+    citecolor=FlatlyTeal,
+    filecolor=FlatlyTeal
+  }
+}
+
+% Force the visible text of external hyperlinks to teal.
+% This prevents later Pandoc/hyperref settings from turning \href text black.
+\AtBeginDocument{
+  \let\oldhref\href
+  \renewcommand{\href}[2]{%
+    \oldhref{#1}{\textcolor{FlatlyTeal}{#2}}%
+  }
+}
