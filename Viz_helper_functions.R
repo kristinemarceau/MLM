@@ -1614,5 +1614,6 @@ plot_variance_explained <- function(models,
         level,
         " Variance Explained"
       )
-    )
+    ) +
+    ggplot2::theme_minimal()
 }
