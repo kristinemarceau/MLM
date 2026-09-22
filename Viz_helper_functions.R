@@ -1168,3 +1168,452 @@ print_corr_table <- function(x,
     row.names = TRUE
   )
 }
+
+      # ==============================================================================
+# PLOT VARIANCE EXPLAINED ACROSS MULTILEVEL MODELS
+# ==============================================================================
+#
+# This function plots proportional reduction in variance (PRE) across a sequence
+# of multilevel models.
+#
+# PRE tells us how much an estimated variance component decreases after adding
+# predictors to a model. It is not the same as ordinary regression R-squared.
+#
+# At Level 1:
+#   PRE describes the proportional reduction in within-cluster residual variance.
+#
+# At Level 2:
+#   PRE describes the proportional reduction in between-cluster intercept variance.
+#
+# The function can display:
+#
+#   "incremental" = variance explained by each model relative to the model
+#                   immediately before it
+#
+#   "total"       = total variance explained by each model relative to the
+#                   first model supplied
+#
+#   "both"        = incremental and total variance explained side-by-side
+#
+# IMPORTANT FOR LEVEL-2 COMPARISONS:
+# Models used to calculate Level-2 PRE must have the same Level-1 fixed-effects
+# structure. Otherwise, a change in Level-2 variance could reflect a change in
+# the Level-1 model rather than variance explained by a Level-2 predictor.
+#
+# The function checks the observed model data to identify predictors that vary
+# within clusters. If an invalid Level-2 comparison is requested, the function
+# stops and prints a message explaining the problem.
+#
+# The y-axis is displayed from 0% to 100%. If a PRE is negative, the lower limit
+# is extended to -10% (or farther if needed) so that the negative PRE is visible.
+# A negative PRE means that the estimated variance component increased across
+# models; it should not be interpreted as "negative variance explained."
+#
+# The percentage PRE is printed on each bar.
+#
+# Example:
+#
+# plot_variance_explained(
+#   models = list(
+#     "Model 0" = model0_fit,
+#     "Model 1" = model1_fit,
+#     "Model 2" = model2_fit
+#   ),
+#   level = "L1",
+#   type = "both"
+# )
+#
+# ==============================================================================
+
+
+plot_variance_explained <- function(models,
+                                    level = c("L1", "L2"),
+                                    type = c("incremental", "total", "both")) {
+
+  level <- match.arg(level)
+  type  <- match.arg(type)
+
+  # Require at least two models
+  if (length(models) < 2) {
+    stop("Please supply at least two models.")
+  }
+
+  # Give unnamed models simple names
+  if (is.null(names(models)) || any(names(models) == "")) {
+    names(models) <- paste("Model", seq_along(models) - 1)
+  }
+
+
+  # --------------------------------------------------------------------------
+  # Extract the variance component we want to compare
+  # --------------------------------------------------------------------------
+
+  get_variance <- function(model, level) {
+
+    vc <- as.data.frame(lme4::VarCorr(model))
+
+    if (level == "L1") {
+
+      # Level-1 residual variance
+      vc$vcov[vc$grp == "Residual"][1]
+
+    } else {
+
+      # Level-2 random-intercept variance
+      vc$vcov[
+        vc$var1 == "(Intercept)" &
+          vc$grp != "Residual"
+      ][1]
+    }
+  }
+
+  variances <- sapply(
+    models,
+    get_variance,
+    level = level
+  )
+
+
+  # --------------------------------------------------------------------------
+  # Check whether Level-2 comparisons are appropriate
+  # --------------------------------------------------------------------------
+  #
+  # For Level-2 PRE, the models being compared need to contain the same
+  # Level-1 fixed effects.
+  #
+  # We identify Level-1 predictors as fixed-effect variables that vary within
+  # clusters in the data actually used to fit the model.
+
+  if (level == "L2") {
+
+    get_l1_terms <- function(model) {
+
+      mf <- model.frame(model)
+
+      cluster_var <- names(
+        lme4::getME(model, "flist")
+      )[1]
+
+      fixed_terms <- attr(
+        terms(lme4::nobars(formula(model))),
+        "term.labels"
+      )
+
+      fixed_terms[
+        sapply(fixed_terms, function(term) {
+
+          vars <- all.vars(
+            as.formula(paste("~", term))
+          )
+
+          any(
+            sapply(vars, function(v) {
+
+              if (!v %in% names(mf) || v == cluster_var) {
+                return(FALSE)
+              }
+
+              x <- mf[[v]]
+              g <- mf[[cluster_var]]
+
+              any(
+                tapply(
+                  x,
+                  g,
+                  function(z) {
+                    length(unique(z[!is.na(z)])) > 1
+                  }
+                ),
+                na.rm = TRUE
+              )
+            })
+          )
+        })
+      ]
+    }
+
+    l1_terms <- lapply(
+      models,
+      get_l1_terms
+    )
+
+
+    # For incremental PRE, compare each model with the model immediately
+    # before it.
+
+    if (type %in% c("incremental", "both")) {
+
+      valid_incremental <- sapply(
+        2:length(models),
+        function(i) {
+          setequal(
+            l1_terms[[i - 1]],
+            l1_terms[[i]]
+          )
+        }
+      )
+
+      if (any(!valid_incremental)) {
+
+        bad <- which(!valid_incremental) + 1
+
+        stop(
+          paste0(
+            "L2 incremental variance explained cannot be plotted: ",
+            paste(
+              paste0(
+                names(models)[bad - 1],
+                " vs. ",
+                names(models)[bad]
+              ),
+              collapse = "; "
+            ),
+            " have different Level-1 fixed-effects structures."
+          )
+        )
+      }
+    }
+
+
+    # For total PRE, each model must have the same Level-1 structure as
+    # the first model supplied.
+
+    if (type == "total") {
+
+      valid_total <- sapply(
+        2:length(models),
+        function(i) {
+          setequal(
+            l1_terms[[1]],
+            l1_terms[[i]]
+          )
+        }
+      )
+
+      if (any(!valid_total)) {
+
+        stop(
+          paste0(
+            "L2 total variance explained cannot be plotted because ",
+            "the models do not have the same Level-1 fixed-effects structure."
+          )
+        )
+      }
+    }
+  }
+
+
+  # --------------------------------------------------------------------------
+  # Calculate proportional reduction in variance
+  # --------------------------------------------------------------------------
+
+  # Incremental PRE:
+  # each model is compared with the model immediately before it
+
+  incremental <- c(
+    NA,
+    100 *
+      (variances[-length(variances)] - variances[-1]) /
+      variances[-length(variances)]
+  )
+
+
+  # Total PRE:
+  # each model is compared with the first model supplied
+
+  total <- 100 *
+    (variances[1] - variances) /
+    variances[1]
+
+
+  plot_data <- data.frame(
+    Model = factor(
+      names(models),
+      levels = names(models)
+    ),
+    Incremental = incremental,
+    Total = total
+  )
+
+
+  # --------------------------------------------------------------------------
+  # Reshape the data for the requested plot
+  # --------------------------------------------------------------------------
+
+  if (type == "incremental") {
+
+    # The first model has no incremental PRE because there is no previous model
+    plot_data <- plot_data[
+      -1,
+      c("Model", "Incremental")
+    ]
+
+    names(plot_data)[2] <- "PRE"
+  }
+
+
+  if (type == "total") {
+
+    plot_data <- plot_data[
+      ,
+      c("Model", "Total")
+    ]
+
+    names(plot_data)[2] <- "PRE"
+  }
+
+
+  if (type == "both") {
+
+    plot_data <- tidyr::pivot_longer(
+      plot_data,
+      cols = c("Incremental", "Total"),
+      names_to = "PRE_type",
+      values_to = "PRE"
+    ) |>
+      dplyr::filter(!is.na(PRE))
+  }
+
+
+  # --------------------------------------------------------------------------
+  # Set the y-axis
+  # --------------------------------------------------------------------------
+  #
+  # Usually show 0% to 100%.
+  # If there is a negative PRE, extend the scale downward so it is visible.
+  # The minimum is -10%, but the scale will extend farther if necessary.
+
+  min_pre <- min(
+    plot_data$PRE,
+    na.rm = TRUE
+  )
+
+  if (min_pre < 0) {
+
+    lower_limit <- min(
+      -10,
+      floor(min_pre / 10) * 10
+    )
+
+    y_breaks <- unique(
+      c(
+        lower_limit,
+        0, 20, 40, 60, 80, 100
+      )
+    )
+
+  } else {
+
+    lower_limit <- 0
+    y_breaks <- seq(
+      0,
+      100,
+      20
+    )
+  }
+
+
+  # --------------------------------------------------------------------------
+  # Make the plot
+  # --------------------------------------------------------------------------
+  #
+  # Percent variance explained is printed above each positive bar.
+  # Negative PRE values are printed below the bar.
+
+  if (type == "both") {
+
+    p <- ggplot2::ggplot(
+      plot_data,
+      ggplot2::aes(
+        x = Model,
+        y = PRE,
+        fill = PRE_type
+      )
+    ) +
+      ggplot2::geom_col(
+        position = ggplot2::position_dodge(width = .7),
+        width = .7
+      ) +
+      ggplot2::geom_text(
+        ggplot2::aes(
+          label = paste0(
+            round(PRE, 1),
+            "%"
+          ),
+          vjust = ifelse(
+            PRE >= 0,
+            -0.4,
+            1.4
+          )
+        ),
+        position = ggplot2::position_dodge(width = .7),
+        size = 3.5
+      ) +
+      ggplot2::labs(
+        fill = NULL
+      )
+
+  } else {
+
+    p <- ggplot2::ggplot(
+      plot_data,
+      ggplot2::aes(
+        x = Model,
+        y = PRE
+      )
+    ) +
+      ggplot2::geom_col(
+        width = .7
+      ) +
+      ggplot2::geom_text(
+        ggplot2::aes(
+          label = paste0(
+            round(PRE, 1),
+            "%"
+          ),
+          vjust = ifelse(
+            PRE >= 0,
+            -0.4,
+            1.4
+          )
+        ),
+        size = 3.5
+      )
+  }
+
+
+  # --------------------------------------------------------------------------
+  # Format the plot
+  # --------------------------------------------------------------------------
+
+  p +
+    ggplot2::geom_hline(
+      yintercept = 0,
+      linewidth = .4
+    ) +
+    ggplot2::scale_y_continuous(
+      limits = c(
+        lower_limit,
+        100
+      ),
+      breaks = y_breaks,
+      labels = function(x) {
+        paste0(x, "%")
+      }
+    ) +
+    ggplot2::coord_cartesian(
+      clip = "off"
+    ) +
+    ggplot2::labs(
+      x = NULL,
+      y = paste0(
+        level,
+        " variance explained"
+      ),
+      title = paste0(
+        level,
+        " Variance Explained"
+      )
+    ) +
+    cleanplots::theme_clean()
+}
