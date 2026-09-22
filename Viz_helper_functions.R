@@ -1520,7 +1520,7 @@ plot_variance_explained <- function(models,
   # Percent variance explained is printed above each positive bar.
   # Negative PRE values are printed below the bar.
 
-  if (type == "both") {
+   if (type == "both") {
 
     p <- ggplot2::ggplot(
       plot_data,
@@ -1532,26 +1532,21 @@ plot_variance_explained <- function(models,
     ) +
       ggplot2::geom_col(
         position = ggplot2::position_dodge(width = .7),
-        width = .7
+        width = .7,
+        color = "black"
       ) +
       ggplot2::geom_text(
         ggplot2::aes(
-          label = paste0(
-            round(PRE, 1),
-            "%"
-          ),
-          vjust = ifelse(
-            PRE >= 0,
-            -0.4,
-            1.4
-          )
+          label = paste0(round(PRE, 1), "%"),
+          vjust = ifelse(PRE >= 0, -0.4, 1.4)
         ),
         position = ggplot2::position_dodge(width = .7),
         size = 3.5
       ) +
-      ggplot2::labs(
-        fill = NULL
-      )
+      ggplot2::scale_fill_manual(
+        values = cleanplots[1:2]
+      ) +
+      ggplot2::labs(fill = NULL)
 
   } else {
 
@@ -1563,19 +1558,14 @@ plot_variance_explained <- function(models,
       )
     ) +
       ggplot2::geom_col(
-        width = .7
+        width = .7,
+        fill = cleanplots[1],
+        color = "black"
       ) +
       ggplot2::geom_text(
         ggplot2::aes(
-          label = paste0(
-            round(PRE, 1),
-            "%"
-          ),
-          vjust = ifelse(
-            PRE >= 0,
-            -0.4,
-            1.4
-          )
+          label = paste0(round(PRE, 1), "%"),
+          vjust = ifelse(PRE >= 0, -0.4, 1.4)
         ),
         size = 3.5
       )
