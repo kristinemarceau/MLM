@@ -1614,6 +1614,5 @@ plot_variance_explained <- function(models,
         level,
         " Variance Explained"
       )
-    ) +
-    cleanplots::theme_clean()
+    )
 }
