@@ -1607,3 +1607,352 @@ plot_variance_explained <- function(models,
     ) +
     ggplot2::theme_minimal()
 }
+
+# ==============================================================================
+# PLOT ICC / VARIANCE PARTITION
+# ==============================================================================
+#
+# This function visualizes the variance partition from an unconditional
+# two-level model.
+#
+# The full bar represents 100% of the outcome variance.
+#
+#   Within = percentage of variance among individuals within clusters
+#   Between = percentage of variance between clusters
+#
+# Together, the two portions of the bar sum to 100%.
+#
+# Example:
+#
+# plot_icc(model0_fit)
+#
+# ==============================================================================
+
+plot_icc <- function(model) {
+
+  vc <- as.data.frame(lme4::VarCorr(model))
+
+  within_var <- vc$vcov[vc$grp == "Residual"][1]
+
+  between_var <- vc$vcov[
+    vc$var1 == "(Intercept)" &
+      vc$grp != "Residual"
+  ][1]
+
+  total_var <- within_var + between_var
+
+  plot_data <- data.frame(
+    Level = factor(
+      c("Within", "Between"),
+      levels = c("Within", "Between")
+    ),
+    Percent = 100 * c(
+      within_var,
+      between_var
+    ) / total_var
+  )
+
+  ggplot2::ggplot(
+    plot_data,
+    ggplot2::aes(
+      x = "Variance",
+      y = Percent,
+      fill = Level
+    )
+  ) +
+    ggplot2::geom_col(
+      width = .6
+    ) +
+    ggplot2::geom_text(
+      ggplot2::aes(
+        label = paste0(
+          round(Percent, 1),
+          "%"
+        )
+      ),
+      position = ggplot2::position_stack(vjust = .5),
+      size = 4
+    ) +
+    ggplot2::scale_fill_manual(
+      values = cleanplots[1:2]
+    ) +
+    ggplot2::scale_y_continuous(
+      limits = c(0, 100),
+      breaks = seq(0, 100, 20),
+      labels = function(x) paste0(x, "%")
+    ) +
+    ggplot2::labs(
+      x = NULL,
+      y = "Percent of total variance",
+      fill = NULL,
+      title = "Variance Partition"
+    ) +
+    ggplot2::theme_minimal()
+}
+
+      # ==============================================================================
+# PLOT TOTAL VARIANCE EXPLAINED
+# ==============================================================================
+#
+# This function shows how Level-1 and Level-2 variance explained contribute
+# to the total variance in the outcome.
+#
+# The unconditional model provides the original variance partition:
+#
+#   Level 1 = within-cluster variance
+#   Level 2 = between-cluster variance
+#
+# Each bar represents 100% of the variance in the unconditional model.
+# The original Level-1 and Level-2 variance partition therefore stays the
+# same across bars.
+#
+# Within each level, the plot shows how much of the ORIGINAL variance at that
+# level has been explained by predictors in a later model.
+#
+# IMPORTANT:
+# PRE at a particular level is the proportion of variance explained WITHIN
+# that level. It is not directly the proportion of TOTAL outcome variance.
+#
+# For example, if:
+#
+#   80% of the original variance is at Level 1
+#   20% of the original variance is at Level 2
+#
+# and a model explains:
+#
+#   25% of the Level-1 variance
+#   50% of the Level-2 variance
+#
+# then:
+#
+#   20% of total variance is explained at Level 1 (.80 x .25)
+#   10% of total variance is explained at Level 2 (.20 x .50)
+#
+# The plot labels explained portions with:
+#
+#   % of variance explained at that level
+#   % of total variance explained
+#
+# Models used for Level-2 PRE must have the same Level-1 fixed-effects
+# structure as the unconditional/reference model used for that Level-2
+# comparison.
+#
+# Example:
+#
+# plot_total_variance_explained(
+#   model0 = model0_fit,
+#   model_l1 = model1_fit,
+#   model_l2 = model2_fit,
+#   labels = c(
+#     "Unconditional",
+#     "+ L1 Income",
+#     "+ L2 Income"
+#   )
+# )
+#
+# ==============================================================================
+
+
+plot_total_variance_explained <- function(model0,
+                                          model_l1,
+                                          model_l2,
+                                          labels = c(
+                                            "Unconditional",
+                                            "+ L1 Predictor",
+                                            "+ L2 Predictor"
+                                          )) {
+
+  # --------------------------------------------------------------------------
+  # Extract Level-1 and Level-2 variance
+  # --------------------------------------------------------------------------
+
+  get_variance <- function(model) {
+
+    vc <- as.data.frame(lme4::VarCorr(model))
+
+    within <- vc$vcov[
+      vc$grp == "Residual"
+    ][1]
+
+    between <- vc$vcov[
+      vc$var1 == "(Intercept)" &
+        vc$grp != "Residual"
+    ][1]
+
+    c(
+      within = within,
+      between = between
+    )
+  }
+
+
+  v0 <- get_variance(model0)
+  v1 <- get_variance(model_l1)
+  v2 <- get_variance(model_l2)
+
+
+  # --------------------------------------------------------------------------
+  # Original ICC / variance partition
+  # --------------------------------------------------------------------------
+
+  total0 <- sum(v0)
+
+  pct_within <- 100 * v0["within"] / total0
+  pct_between <- 100 * v0["between"] / total0
+
+
+  # --------------------------------------------------------------------------
+  # Calculate PRE within each level
+  # --------------------------------------------------------------------------
+  #
+  # Level-1 PRE is relative to the unconditional Level-1 variance.
+  #
+  # Level-2 PRE is calculated by comparing model_l2 with model_l1 because
+  # those models should contain the same Level-1 structure.
+
+  pre_l1 <- 100 *
+    (v0["within"] - v1["within"]) /
+    v0["within"]
+
+  pre_l2 <- 100 *
+    (v1["between"] - v2["between"]) /
+    v1["between"]
+
+
+  # --------------------------------------------------------------------------
+  # Convert level-specific PRE to percent of TOTAL original variance
+  # --------------------------------------------------------------------------
+
+  l1_explained_total <- pct_within * pre_l1 / 100
+
+  l2_explained_total <- pct_between * pre_l2 / 100
+
+
+  # --------------------------------------------------------------------------
+  # Create plotting data
+  # --------------------------------------------------------------------------
+
+  plot_data <- data.frame(
+    Model = factor(
+      rep(labels, each = 4),
+      levels = labels
+    ),
+    Component = factor(
+      rep(
+        c(
+          "L1 Explained",
+          "L1 Remaining",
+          "L2 Explained",
+          "L2 Remaining"
+        ),
+        times = 3
+      ),
+      levels = c(
+        "L1 Explained",
+        "L1 Remaining",
+        "L2 Explained",
+        "L2 Remaining"
+      )
+    ),
+    Percent = c(
+
+      # Unconditional model
+      0,
+      pct_within,
+      0,
+      pct_between,
+
+      # Model with L1 predictor
+      l1_explained_total,
+      pct_within - l1_explained_total,
+      0,
+      pct_between,
+
+      # Model with L1 + L2 predictors
+      l1_explained_total,
+      pct_within - l1_explained_total,
+      l2_explained_total,
+      pct_between - l2_explained_total
+    )
+  )
+
+
+  # --------------------------------------------------------------------------
+  # Labels for the explained portions
+  # --------------------------------------------------------------------------
+
+  plot_data$Label <- ""
+
+  plot_data$Label[
+    plot_data$Model == labels[2] &
+      plot_data$Component == "L1 Explained"
+  ] <- paste0(
+    round(pre_l1, 1),
+    "% of L1\n",
+    round(l1_explained_total, 1),
+    "% total"
+  )
+
+  plot_data$Label[
+    plot_data$Model == labels[3] &
+      plot_data$Component == "L1 Explained"
+  ] <- paste0(
+    round(pre_l1, 1),
+    "% of L1\n",
+    round(l1_explained_total, 1),
+    "% total"
+  )
+
+  plot_data$Label[
+    plot_data$Model == labels[3] &
+      plot_data$Component == "L2 Explained"
+  ] <- paste0(
+    round(pre_l2, 1),
+    "% of L2\n",
+    round(l2_explained_total, 1),
+    "% total"
+  )
+
+
+  # --------------------------------------------------------------------------
+  # Make the plot
+  # --------------------------------------------------------------------------
+
+  ggplot2::ggplot(
+    plot_data,
+    ggplot2::aes(
+      x = Model,
+      y = Percent,
+      fill = Component
+    )
+  ) +
+    ggplot2::geom_col(
+      width = .7
+    ) +
+    ggplot2::geom_text(
+      ggplot2::aes(
+        label = Label
+      ),
+      position = ggplot2::position_stack(
+        vjust = .5
+      ),
+      size = 3.3
+    ) +
+    ggplot2::scale_fill_manual(
+      values = cleanplots[1:4]
+    ) +
+    ggplot2::scale_y_continuous(
+      limits = c(0, 100),
+      breaks = seq(0, 100, 20),
+      labels = function(x) {
+        paste0(x, "%")
+      }
+    ) +
+    ggplot2::labs(
+      x = NULL,
+      y = "Percent of total variance",
+      fill = NULL,
+      title = "Total Variance Explained"
+    ) +
+    ggplot2::theme_minimal()
+}
