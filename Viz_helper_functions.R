@@ -57,6 +57,11 @@ cleanplots <- c(
   "#938DD2", "#1A476F"
 )
 
+cleanplots_secondary <- c(
+  "#E69F00", "#56B4E9", "#009E73", "#F0E442",
+  "#0072B2", "#D55E00", "#CC79A7", "#999999",
+  "#332288", "#88CCEE"
+)
 
 ############################################################
 # plot_distribution()
@@ -220,7 +225,7 @@ plot_distribution_by_time <- function(data,
                                       xlab = NULL,
                                       annotate_x = NULL,
                                       bins = 30,
-                                      fill_palette = c(cleanplots)) {
+                                      fill_palette = c(cleanplots, cleanplots_secondary)) {
   var_sym <- rlang::enquo(var)
   time_sym <- rlang::enquo(time_var)
   var_str <- rlang::as_label(var_sym)
@@ -228,7 +233,14 @@ plot_distribution_by_time <- function(data,
 
   plot_data <- data %>%
     dplyr::filter(!is.na(!!var_sym), !is.na(!!time_sym))
+  
+  # Make sure there are enough colors for all timepoints
+  n_time <- dplyr::n_distinct(plot_data[[time_str]])
 
+  if (length(fill_palette) < n_time) {
+    fill_palette <- grDevices::colorRampPalette(fill_palette)(n_time)
+  }
+  
   stats_by_time <- plot_data %>%
     dplyr::group_by(!!time_sym) %>%
     dplyr::summarise(
