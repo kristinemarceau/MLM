@@ -1319,49 +1319,40 @@ plot_variance_explained <- function(models,
 
     get_l1_terms <- function(model) {
 
-      mf <- model.frame(model)
+  mf <- model.frame(model)
+  cluster_var <- names(lme4::getME(model, "flist"))[1]
 
-      cluster_var <- names(
-        lme4::getME(model, "flist")
-      )[1]
+  fixed_terms <- attr(
+    terms(lme4::nobars(formula(model))),
+    "term.labels"
+  )
 
-      fixed_terms <- attr(
-        terms(lme4::nobars(formula(model))),
-        "term.labels"
-      )
+  l1_terms <- fixed_terms[
+    vapply(fixed_terms, function(term) {
 
-      fixed_terms[
-        sapply(fixed_terms, function(term) {
+      vars <- all.vars(as.formula(paste("~", term)))
 
-          vars <- all.vars(
-            as.formula(paste("~", term))
-          )
+      any(vapply(vars, function(v) {
 
-          any(
-            sapply(vars, function(v) {
+        if (!v %in% names(mf) || v == cluster_var)
+          return(FALSE)
 
-              if (!v %in% names(mf) || v == cluster_var) {
-                return(FALSE)
-              }
+        x <- mf[[v]]
+        g <- mf[[cluster_var]]
 
-              x <- mf[[v]]
-              g <- mf[[cluster_var]]
+        any(vapply(
+          split(x, g),
+          function(z) length(unique(z[!is.na(z)])) > 1,
+          logical(1)
+        ))
 
-              any(
-                tapply(
-                  x,
-                  g,
-                  function(z) {
-                    length(unique(z[!is.na(z)])) > 1
-                  }
-                ),
-                na.rm = TRUE
-              )
-            })
-          )
-        })
-      ]
-    }
+      }, logical(1)))
+
+    }, logical(1))
+  ]
+
+  sort(l1_terms)
+}
 
     l1_terms <- lapply(
       models,
