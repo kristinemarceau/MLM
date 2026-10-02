@@ -1259,7 +1259,8 @@ print_corr_table <- function(x,
 
 plot_variance_explained <- function(models,
                                     level = c("L1", "L2"),
-                                    type = c("incremental", "total", "both")) {
+                                    type = c("incremental", "total", "both"),
+                                    random_effect = "(Intercept)") {
 
   level <- match.arg(level)
   type  <- match.arg(type)
@@ -1279,7 +1280,7 @@ plot_variance_explained <- function(models,
   # Extract the variance component we want to compare
   # --------------------------------------------------------------------------
 
-  get_variance <- function(model, level) {
+  get_variance <- function(model, level, random_effect) {
 
     vc <- as.data.frame(lme4::VarCorr(model))
 
@@ -1290,9 +1291,10 @@ plot_variance_explained <- function(models,
 
     } else {
 
-      # Level-2 random-intercept variance
+      # Level-2 variance for the requested random effect
       vc$vcov[
-        vc$var1 == "(Intercept)" &
+        vc$var1 == random_effect &
+          is.na(vc$var2) &
           vc$grp != "Residual"
       ][1]
     }
@@ -1301,7 +1303,8 @@ plot_variance_explained <- function(models,
   variances <- sapply(
     models,
     get_variance,
-    level = level
+    level = level,
+    random_effect = random_effect
   )
 
 
@@ -1309,118 +1312,64 @@ plot_variance_explained <- function(models,
   # Check whether Level-2 comparisons are appropriate
   # --------------------------------------------------------------------------
   #
-  # For Level-2 PRE, the models being compared need to contain the same
-  # Level-1 fixed effects.
+  # For L2 PRE, the requested random effect must be present in every model
+  # and the models must have the same random-effects structure.
   #
-  # We identify Level-1 predictors as fixed-effect variables that vary within
-  # clusters in the data actually used to fit the model.
+  # For a random intercept, PRE describes reduction in unexplained
+  # between-person variation in outcome level.
+  #
+  # For a random slope, PRE describes reduction in unexplained
+  # between-person variation in that slope.
 
   if (level == "L2") {
 
-    get_l1_terms <- function(model) {
-
-  mf <- model.frame(model)
-  cluster_var <- names(lme4::getME(model, "flist"))[1]
-
-  fixed_terms <- attr(
-    terms(lme4::nobars(formula(model))),
-    "term.labels"
-  )
-
-  l1_terms <- fixed_terms[
-    vapply(fixed_terms, function(term) {
-
-      vars <- all.vars(as.formula(paste("~", term)))
-
-      any(vapply(vars, function(v) {
-
-        if (!v %in% names(mf) || v == cluster_var)
-          return(FALSE)
-
-        x <- mf[[v]]
-        g <- mf[[cluster_var]]
-
-        any(vapply(
-          split(x, g),
-          function(z) length(unique(z[!is.na(z)])) > 1,
-          logical(1)
-        ))
-
-      }, logical(1)))
-
-    }, logical(1))
-  ]
-
-  sort(l1_terms)
-}
-
-    l1_terms <- lapply(
-      models,
-      get_l1_terms
-    )
-
-
-    # For incremental PRE, compare each model with the model immediately
-    # before it.
-
-    if (type %in% c("incremental", "both")) {
-
-      valid_incremental <- sapply(
-        2:length(models),
-        function(i) {
-          setequal(
-            l1_terms[[i - 1]],
-            l1_terms[[i]]
-          )
-        }
-      )
-
-      if (any(!valid_incremental)) {
-
-        bad <- which(!valid_incremental) + 1
-
-        stop(
-          paste0(
-            "L2 incremental variance explained cannot be plotted: ",
-            paste(
-              paste0(
-                names(models)[bad - 1],
-                " vs. ",
-                names(models)[bad]
-              ),
-              collapse = "; "
-            ),
-            " have different Level-1 fixed-effects structures."
-          )
+    # Requested random effect must exist in every model
+    if (any(is.na(variances))) {
+      stop(
+        paste0(
+          "The random effect '",
+          random_effect,
+          "' is not present in every model."
         )
-      }
+      )
     }
 
+    # Extract random-effects terms from each model
+    random_terms <- lapply(
+      models,
+      function(model) {
 
-    # For total PRE, each model must have the same Level-1 structure as
-    # the first model supplied.
+        vc <- as.data.frame(lme4::VarCorr(model))
 
-    if (type == "total") {
-
-      valid_total <- sapply(
-        2:length(models),
-        function(i) {
-          setequal(
-            l1_terms[[1]],
-            l1_terms[[i]]
-          )
-        }
-      )
-
-      if (any(!valid_total)) {
-
-        stop(
-          paste0(
-            "L2 total variance explained cannot be plotted because ",
-            "the models do not have the same Level-1 fixed-effects structure."
+        sort(
+          unique(
+            vc$var1[
+              vc$grp != "Residual" &
+                !is.na(vc$var1)
+            ]
           )
         )
       }
+    )
+
+    # All models must have the same random-effects structure
+    same_random_structure <- all(
+      vapply(
+        random_terms[-1],
+        function(x) {
+          setequal(x, random_terms[[1]])
+        },
+        logical(1)
+      )
+    )
+
+    if (!same_random_structure) {
+      stop(
+        paste0(
+          "L2 variance explained cannot be compared because ",
+          "the models have different random-effects structures."
+        )
+      )
     }
   }
 
@@ -1464,7 +1413,7 @@ plot_variance_explained <- function(models,
 
   if (type == "incremental") {
 
-    # The first model has no incremental PRE because there is no previous model
+    # First model has no incremental PRE
     plot_data <- plot_data[
       -1,
       c("Model", "Incremental")
@@ -1502,8 +1451,7 @@ plot_variance_explained <- function(models,
   # --------------------------------------------------------------------------
   #
   # Usually show 0% to 100%.
-  # If there is a negative PRE, extend the scale downward so it is visible.
-  # The minimum is -10%, but the scale will extend farther if necessary.
+  # If there is a negative PRE, extend the scale downward.
 
   min_pre <- min(
     plot_data$PRE,
@@ -1527,6 +1475,7 @@ plot_variance_explained <- function(models,
   } else {
 
     lower_limit <- 0
+
     y_breaks <- seq(
       0,
       100,
@@ -1536,13 +1485,35 @@ plot_variance_explained <- function(models,
 
 
   # --------------------------------------------------------------------------
+  # Create labels
+  # --------------------------------------------------------------------------
+
+  if (level == "L1") {
+
+    y_label <- "L1 residual variance explained"
+    plot_title <- "L1 Residual Variance Explained"
+
+  } else if (random_effect == "(Intercept)") {
+
+    y_label <- "L2 random-intercept variance explained"
+    plot_title <- "L2 Random-Intercept Variance Explained"
+
+  } else {
+
+    y_label <- "L2 random-slope variance explained"
+
+    plot_title <- paste0(
+      "L2 Random-Slope Variance Explained: ",
+      random_effect
+    )
+  }
+
+
+  # --------------------------------------------------------------------------
   # Make the plot
   # --------------------------------------------------------------------------
-  #
-  # Percent variance explained is printed above each positive bar.
-  # Negative PRE values are printed below the bar.
 
-   if (type == "both") {
+  if (type == "both") {
 
     p <- ggplot2::ggplot(
       plot_data,
@@ -1568,7 +1539,9 @@ plot_variance_explained <- function(models,
       ggplot2::scale_fill_manual(
         values = cleanplots[1:2]
       ) +
-      ggplot2::labs(fill = NULL)
+      ggplot2::labs(
+        fill = NULL
+      )
 
   } else {
 
@@ -1618,14 +1591,8 @@ plot_variance_explained <- function(models,
     ) +
     ggplot2::labs(
       x = NULL,
-      y = paste0(
-        level,
-        " variance explained"
-      ),
-      title = paste0(
-        level,
-        " Variance Explained"
-      )
+      y = y_label,
+      title = plot_title
     ) +
     ggplot2::theme_minimal()
 }
