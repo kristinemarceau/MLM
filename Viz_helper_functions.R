@@ -218,117 +218,136 @@ plot_distribution <- function(data, var, title = NULL,
 #   - Uses cleanplots as the default discrete fill palette.
 ############################################################
 
-plot_distribution_by_time <- function(data,
-                                      var,
-                                      time_var,
+plot_distribution_by_time <- function(data, var, time_var,
                                       title = NULL,
-                                      xlab = NULL,
-                                      annotate_x = NULL,
-                                      bins = 30,
-                                      fill_palette = c(cleanplots, cleanplots_secondary)) {
-  var_sym <- rlang::enquo(var)
-  time_sym <- rlang::enquo(time_var)
-  var_str <- rlang::as_label(var_sym)
-  time_str <- rlang::as_label(time_sym)
+                                      xlab = NULL) {
 
+  var_sym  <- rlang::ensym(var)
+  time_sym <- rlang::ensym(time_var)
+
+  # Keep complete cases and treat time as a discrete grouping variable
   plot_data <- data %>%
-    dplyr::filter(!is.na(!!var_sym), !is.na(!!time_sym))
-  
-  # Make sure there are enough colors for all timepoints
-  n_time <- dplyr::n_distinct(plot_data[[time_str]])
+    dplyr::filter(
+      !is.na(!!var_sym),
+      !is.na(!!time_sym)
+    ) %>%
+    dplyr::mutate(
+      !!time_sym := factor(!!time_sym)
+    )
 
-  if (length(fill_palette) < n_time) {
-    fill_palette <- grDevices::colorRampPalette(fill_palette)(n_time)
-  }
-  
+  # Calculate descriptive statistics separately at each time point
   stats_by_time <- plot_data %>%
     dplyr::group_by(!!time_sym) %>%
     dplyr::summarise(
-      N = sum(!is.na(!!var_sym)),
       M = mean(!!var_sym, na.rm = TRUE),
       SD = stats::sd(!!var_sym, na.rm = TRUE),
-      Skew = moments::skewness(!!var_sym, na.rm = TRUE),
-      Kurt = moments::kurtosis(!!var_sym, na.rm = TRUE),
-      min_x = min(!!var_sym, na.rm = TRUE),
       .groups = "drop"
     ) %>%
     dplyr::mutate(
       summary_text = paste0(
-        "N = ", N, "\n",
-        "Mean = ", round(M, 2), "\n",
-        "SD = ", round(SD, 2), "\n",
-        "Skew = ", round(Skew, 2), "\n",
-        "Kurtosis = ", round(Kurt, 2)
-      ),
-      annotate_x = if (is.null(annotate_x)) min_x else annotate_x
+        "M = ", round(M, 2),
+        ", SD = ", round(SD, 2)
+      )
+    )
+
+  # Position summary text near left side of each panel
+  x_range <- range(plot_data[[rlang::as_name(var_sym)]], na.rm = TRUE)
+
+  stats_by_time <- stats_by_time %>%
+    dplyr::mutate(
+      annotate_x = x_range[1] + .03 * diff(x_range)
     )
 
   ggplot2::ggplot(
-    data = plot_data,
-    ggplot2::aes(x = !!var_sym, fill = !!time_sym)
+    plot_data,
+    ggplot2::aes(
+      x = !!var_sym,
+      fill = !!time_sym
+    )
   ) +
-    ggplot2::geom_histogram(color = "#000000", bins = bins, show.legend = FALSE) +
-    ggplot2::geom_vline(
-      data = stats_by_time,
-      ggplot2::aes(xintercept = M),
-      color = "#000000",
-      linewidth = 1.25,
-      inherit.aes = FALSE
+    ggplot2::geom_histogram(
+      bins = 30,
+      color = "black",
+      alpha = .8
     ) +
+
+    # Mean
     ggplot2::geom_vline(
       data = stats_by_time,
-      ggplot2::aes(xintercept = M + SD),
+      mapping = ggplot2::aes(xintercept = M),
+      inherit.aes = FALSE,
       color = "#000000",
-      linewidth = 1,
-      linetype = "dashed",
-      inherit.aes = FALSE
+      linewidth = 1.25
     ) +
+
+    # +/- 1 SD
     ggplot2::geom_vline(
       data = stats_by_time,
-      ggplot2::aes(xintercept = M - SD),
-      color = "#000000",
-      linewidth = 1,
-      linetype = "dashed",
-      inherit.aes = FALSE
-    ) +
-    ggplot2::geom_vline(
-      data = stats_by_time,
-      ggplot2::aes(xintercept = M + 3 * SD),
+      mapping = ggplot2::aes(xintercept = M - SD),
+      inherit.aes = FALSE,
       color = "#000000",
       linewidth = 1,
-      linetype = "dotted",
-      inherit.aes = FALSE
+      linetype = "dashed"
     ) +
     ggplot2::geom_vline(
       data = stats_by_time,
-      ggplot2::aes(xintercept = M - 3 * SD),
+      mapping = ggplot2::aes(xintercept = M + SD),
+      inherit.aes = FALSE,
       color = "#000000",
       linewidth = 1,
-      linetype = "dotted",
-      inherit.aes = FALSE
+      linetype = "dashed"
     ) +
+
+    # +/- 3 SD
+    ggplot2::geom_vline(
+      data = stats_by_time,
+      mapping = ggplot2::aes(xintercept = M - 3 * SD),
+      inherit.aes = FALSE,
+      color = "#000000",
+      linewidth = .8,
+      linetype = "dotted"
+    ) +
+    ggplot2::geom_vline(
+      data = stats_by_time,
+      mapping = ggplot2::aes(xintercept = M + 3 * SD),
+      inherit.aes = FALSE,
+      color = "#000000",
+      linewidth = .8,
+      linetype = "dotted"
+    ) +
+
+    # M and SD annotation
     ggplot2::geom_text(
       data = stats_by_time,
-      ggplot2::aes(x = annotate_x, y = Inf, label = summary_text),
+      mapping = ggplot2::aes(
+        x = annotate_x,
+        y = Inf,
+        label = summary_text
+      ),
+      inherit.aes = FALSE,
       hjust = 0,
       vjust = 1.05,
       size = 4,
-      fontface = "italic",
-      inherit.aes = FALSE
+      fontface = "italic"
     ) +
-    ggplot2::facet_wrap(ggplot2::vars(!!time_sym)) +
-    ggplot2::scale_fill_manual(values = fill_palette) +
-    ggplot2::ggtitle(ifelse(is.null(title), var_str, title)) +
+
+    ggplot2::facet_wrap(
+      ggplot2::vars(!!time_sym),
+      scales = "free_y"
+    ) +
+    ggplot2::scale_fill_manual(
+      values = rep(cleanplots, length.out = dplyr::n_distinct(plot_data[[rlang::as_name(time_sym)]]))
+    ) +
     ggplot2::labs(
-      x = ifelse(is.null(xlab), var_str, xlab),
-      caption = paste0(
-        "Facets = ", time_str, "\n",
-        "solid line = time-specific mean\n",
-        "dashed line = time-specific +/-1SD\n",
-        "dotted line = time-specific +/-3SD"
-      )
+      title = title,
+      x = xlab,
+      y = "Count",
+      fill = rlang::as_name(time_sym)
     ) +
-    ggplot2::theme_minimal()
+    ggplot2::theme_minimal() +
+    ggplot2::theme(
+      legend.position = "none"
+    )
 }
 
 
